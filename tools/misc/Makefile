@@ -35,6 +35,7 @@ INSTALL_SBIN += $(INSTALL_SBIN-y)
 
 # Everything to be installed in a private bin/
 INSTALL_PRIVBIN                += xenpvnetboot
+INSTALL_PRIVBIN                += xen_extra_version.xsplice
 
 # Everything to be installed
 TARGETS_ALL := $(INSTALL_BIN) $(INSTALL_SBIN) $(INSTALL_PRIVBIN)
@@ -111,4 +112,17 @@ gtraceview: gtraceview.o
 xencov: xencov.o
 	$(CC) $(LDFLAGS) -o $@ $< $(LDLIBS_libxenctrl) $(APPEND_LDFLAGS)
 
+xen_extra_version.xsplice: xen_extra_version.c
+	# TODO: Extract build-id, right now we just extract the ELF note, but not
+	# the value itself! Need an ELF parser.
+	objcopy --only-section=.note.gnu.build-id $(XEN_ROOT)/xen/xen-syms build_id.o
+	# And build the payload.
+	$(CC)   -Wl,-build-id=none -Wl,--emit-relocs -Wl,-r -Wl,--entry=xsplice \
+		-fdata-sections -ffunction-sections -nostdlib -Txsplice.lds \
+		build_id.o version_stub.S $(XEN_ROOT)/xen/common/version.o  -o $@ $<
+	@objdump -h --section=.xsplice $@
+	@objdump -h --section=.xsplice_code $@
+	@objdump -h --section=.xsplice_sections $@
+	@objdump -h --section=.xsplice_relocs $@
+	@objdump -h --section=.xsplice_patches $@
 -include $(DEPS)
