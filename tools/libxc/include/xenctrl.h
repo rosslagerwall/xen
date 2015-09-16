@@ -2858,6 +2858,23 @@ int xc_psr_cat_get_l3_info(xc_interface *xch, uint32_t socket,
                            uint32_t *cos_max, uint32_t *cbm_len);
 #endif
 
+int xc_xsplice_upload(xc_interface *xch,
+                      char *id, char *payload, uint32_t size);
+
+int xc_xsplice_get(xc_interface *xch,
+                   char *id,
+                   xen_xsplice_status_t *status);
+
+int xc_xsplice_list(xc_interface *xch, unsigned int max, unsigned int start,
+                    xen_xsplice_status_t *info, char *id,
+                    uint32_t *len, unsigned int *done,
+                    unsigned int *left);
+
+int xc_xsplice_apply(xc_interface *xch, char *id);
+int xc_xsplice_revert(xc_interface *xch, char *id);
+int xc_xsplice_unload(xc_interface *xch, char *id);
+int xc_xsplice_check(xc_interface *xch, char *id);
+
 #endif /* XENCTRL_H */
 
 /*

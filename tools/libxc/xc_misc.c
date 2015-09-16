@@ -718,6 +718,283 @@ int xc_hvm_inject_trap(
     return rc;
 }
 
+int xc_xsplice_upload(xc_interface *xch,
+                      char *id,
+                      char *payload,
+                      uint32_t size)
+{
+    int rc;
+    DECLARE_SYSCTL;
+    DECLARE_HYPERCALL_BOUNCE(payload, size, XC_HYPERCALL_BUFFER_BOUNCE_IN);
+    DECLARE_HYPERCALL_BOUNCE(id, 0 /* adjust later */, XC_HYPERCALL_BUFFER_BOUNCE_IN);
+    ssize_t len;
+
+    if ( !id || !payload )
+        return -1;
+
+    len = strlen(id);
+    if ( len > XEN_XSPLICE_ID_SIZE )
+        return -1;
+
+    HYPERCALL_BOUNCE_SET_SIZE(id, len);
+
+    if ( xc_hypercall_bounce_pre(xch, id) )
+        return -1;
+
+    if ( xc_hypercall_bounce_pre(xch, payload) )
+        return -1;
+
+    sysctl.cmd = XEN_SYSCTL_xsplice_op;
+    sysctl.u.xsplice.cmd = XEN_SYSCTL_XSPLICE_UPLOAD;
+    sysctl.u.xsplice.u.upload.size = size;
+    set_xen_guest_handle(sysctl.u.xsplice.u.upload.payload, payload);
+
+    sysctl.u.xsplice.u.upload.id.size = len;
+    sysctl.u.xsplice.u.upload.id._pad = 0;
+    set_xen_guest_handle(sysctl.u.xsplice.u.upload.id.name, id);
+
+    rc = do_sysctl(xch, &sysctl);
+
+    xc_hypercall_bounce_post(xch, payload);
+    xc_hypercall_bounce_post(xch, id);
+
+    return rc;
+}
+
+int xc_xsplice_get(xc_interface *xch,
+                   char *id,
+                   xen_xsplice_status_t *status)
+{
+    int rc;
+    DECLARE_SYSCTL;
+    DECLARE_HYPERCALL_BOUNCE(id, 0 /*adjust later */, XC_HYPERCALL_BUFFER_BOUNCE_IN);
+    ssize_t len;
+
+    if ( !id )
+        return -1;
+
+    len = strlen(id);
+    if ( len > XEN_XSPLICE_ID_SIZE )
+        return -1;
+
+    HYPERCALL_BOUNCE_SET_SIZE(id, len);
+
+    if ( xc_hypercall_bounce_pre(xch, id) )
+        return -1;
+
+    sysctl.cmd = XEN_SYSCTL_xsplice_op;
+    sysctl.u.xsplice.cmd = XEN_SYSCTL_XSPLICE_GET;
+
+    sysctl.u.xsplice.u.get.status.status = 0;
+
+    sysctl.u.xsplice.u.get.id.size = len;
+    sysctl.u.xsplice.u.get.id._pad = 0;
+    set_xen_guest_handle(sysctl.u.xsplice.u.get.id.name, id);
+
+    rc = do_sysctl(xch, &sysctl);
+
+    xc_hypercall_bounce_post(xch, id);
+
+    memcpy(status, &sysctl.u.xsplice.u.get.status, sizeof(*status));
+
+    return rc;
+}
+
+int xc_xsplice_list(xc_interface *xch, unsigned int max, unsigned int start,
+                    xen_xsplice_status_t *info,
+                    char *id, uint32_t *len,
+                    unsigned int *done,
+                    unsigned int *left)
+{
+    int rc;
+    DECLARE_SYSCTL;
+    DECLARE_HYPERCALL_BOUNCE(info, 0 /* adjust later. */, XC_HYPERCALL_BUFFER_BOUNCE_OUT);
+    DECLARE_HYPERCALL_BOUNCE(id, 0 /* adjust later. */, XC_HYPERCALL_BUFFER_BOUNCE_OUT);
+    DECLARE_HYPERCALL_BOUNCE(len, 0 /* adjust later. */, XC_HYPERCALL_BUFFER_BOUNCE_OUT);
+    uint32_t max_batch_sz, nr;
+    uint32_t version = 0, retries = 0;
+    uint32_t adjust = 0;
+
+    if ( !max || !info || !id || !len )
+        return -1;
+
+    sysctl.cmd = XEN_SYSCTL_xsplice_op;
+    sysctl.u.xsplice.cmd = XEN_SYSCTL_XSPLICE_LIST;
+    sysctl.u.xsplice.u.list.version = 0;
+    sysctl.u.xsplice.u.list.idx = start;
+    sysctl.u.xsplice.u.list._pad = 0;
+
+    max_batch_sz = max;
+
+    *done = 0;
+    *left = 0;
+    do {
+        if ( adjust )
+            adjust = 0; /* Used when adjusting the 'max_batch_sz' or 'retries'. */
+
+        nr = min(max - *done, max_batch_sz);
+
+        sysctl.u.xsplice.u.list.nr = nr;
+        /* Fix the size (may vary between hypercalls). */
+        HYPERCALL_BOUNCE_SET_SIZE(info, nr * sizeof(*info));
+        HYPERCALL_BOUNCE_SET_SIZE(id, nr * sizeof(*id) * XEN_XSPLICE_ID_SIZE);
+        HYPERCALL_BOUNCE_SET_SIZE(len, nr * sizeof(*len));
+        /* Move the pointer to proper offset into 'info'. */
+        (HYPERCALL_BUFFER(info))->ubuf = info + *done;
+        (HYPERCALL_BUFFER(id))->ubuf = id + (sizeof(*id) * XEN_XSPLICE_ID_SIZE * *done);
+        (HYPERCALL_BUFFER(len))->ubuf = len + *done;
+        /* Allocate memory. */
+        rc = xc_hypercall_bounce_pre(xch, info);
+        if ( rc )
+            return rc;
+
+        rc = xc_hypercall_bounce_pre(xch, id);
+        if ( rc )
+        {
+            xc_hypercall_bounce_post(xch, info);
+            return rc;
+        }
+        rc = xc_hypercall_bounce_pre(xch, len);
+        if ( rc )
+        {
+            xc_hypercall_bounce_post(xch, info);
+            xc_hypercall_bounce_post(xch, id);
+            return rc;
+        }
+        set_xen_guest_handle(sysctl.u.xsplice.u.list.status, info);
+        set_xen_guest_handle(sysctl.u.xsplice.u.list.id, id);
+        set_xen_guest_handle(sysctl.u.xsplice.u.list.len, len);
+
+        rc = do_sysctl(xch, &sysctl);
+        /*
+         * From here on we MUST call xc_hypercall_bounce. If rc < 0 we
+         * end up doing it (outside the loop), so using a break is OK.
+         */
+        if ( rc < 0 && errno == E2BIG )
+        {
+            if ( max_batch_sz <= 1 )
+                break;
+            max_batch_sz >>= 1;
+            adjust = 1; /* For the loop conditional to let us loop again. */
+            /* No memory leaks! */
+            xc_hypercall_bounce_post(xch, info);
+            xc_hypercall_bounce_post(xch, id);
+            xc_hypercall_bounce_post(xch, len);
+            continue;
+        }
+        else if ( rc < 0 ) /* For all other errors we bail out. */
+            break;
+
+        if ( !version )
+            version = sysctl.u.xsplice.u.list.version;
+
+        if ( sysctl.u.xsplice.u.list.version != version )
+        {
+            /* TODO: retries should be configurable? */
+            if ( retries++ > 3 )
+            {
+                rc = -1;
+                errno = EBUSY;
+                break;
+            }
+            *done = 0; /* Retry from scratch. */
+            version = sysctl.u.xsplice.u.list.version;
+            adjust = 1; /* And make sure we continue in the loop. */
+            /* No memory leaks. */
+            xc_hypercall_bounce_post(xch, info);
+            xc_hypercall_bounce_post(xch, id);
+            xc_hypercall_bounce_post(xch, len);
+            continue;
+        }
+
+        /* We should never hit this, but just in case. */
+        if ( rc > nr )
+        {
+            errno = EINVAL; /* Overflow! */
+            rc = -1;
+            break;
+        }
+        *left = sysctl.u.xsplice.u.list.nr; /* Total remaining count. */
+        /* Copy only up 'rc' of data' - we could add 'min(rc,nr) if desired. */
+        HYPERCALL_BOUNCE_SET_SIZE(info, (rc * sizeof(*info)));
+        HYPERCALL_BOUNCE_SET_SIZE(id, (rc * sizeof(*id) * XEN_XSPLICE_ID_SIZE));
+        HYPERCALL_BOUNCE_SET_SIZE(len, (rc * sizeof(*len)));
+        /* Bounce the data and free the bounce buffer. */
+        xc_hypercall_bounce_post(xch, info);
+        xc_hypercall_bounce_post(xch, id);
+        xc_hypercall_bounce_post(xch, len);
+        /* And update how many elements of info we have copied into. */
+        *done += rc;
+        /* Update idx. */
+        sysctl.u.xsplice.u.list.idx = *done;
+    } while ( adjust || (*done < max && *left != 0) );
+
+    if ( rc < 0 )
+    {
+        xc_hypercall_bounce_post(xch, len);
+        xc_hypercall_bounce_post(xch, id);
+        xc_hypercall_bounce_post(xch, info);
+    }
+
+    return rc > 0 ? 0 : rc;
+}
+
+static int _xc_xsplice_action(xc_interface *xch,
+                              char *id,
+                              unsigned int action)
+{
+    int rc;
+    DECLARE_SYSCTL;
+    DECLARE_HYPERCALL_BOUNCE(id, 0 /* adjust later */, XC_HYPERCALL_BUFFER_BOUNCE_IN);
+    ssize_t len;
+
+    len = strlen(id);
+
+    if ( len > XEN_XSPLICE_ID_SIZE )
+        return -1;
+
+    HYPERCALL_BOUNCE_SET_SIZE(id, len);
+
+    if ( xc_hypercall_bounce_pre(xch, id) )
+        return -1;
+
+    sysctl.cmd = XEN_SYSCTL_xsplice_op;
+    sysctl.u.xsplice.cmd = XEN_SYSCTL_XSPLICE_ACTION;
+    sysctl.u.xsplice.u.action.cmd = action;
+    sysctl.u.xsplice.u.action._pad = 0;
+    sysctl.u.xsplice.u.action.time = 0; /* TODO */
+
+    sysctl.u.xsplice.u.action.id.size = len;
+    sysctl.u.xsplice.u.action.id._pad = 0;
+    set_xen_guest_handle(sysctl.u.xsplice.u.action.id.name, id);
+
+    rc = do_sysctl(xch, &sysctl);
+
+    xc_hypercall_bounce_post(xch, id);
+
+    return rc;
+}
+
+int xc_xsplice_apply(xc_interface *xch, char *id)
+{
+    return _xc_xsplice_action(xch, id, XSPLICE_ACTION_APPLY);
+}
+
+int xc_xsplice_revert(xc_interface *xch, char *id)
+{
+    return _xc_xsplice_action(xch, id, XSPLICE_ACTION_REVERT);
+}
+
+int xc_xsplice_unload(xc_interface *xch, char *id)
+{
+    return _xc_xsplice_action(xch, id, XSPLICE_ACTION_UNLOAD);
+}
+
+int xc_xsplice_check(xc_interface *xch, char *id)
+{
+    return _xc_xsplice_action(xch, id, XSPLICE_ACTION_CHECK);
+}
+
 /*
  * Local variables:
  * mode: C
