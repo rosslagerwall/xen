@@ -962,6 +962,35 @@ static unsigned int debugtrace_used;
 static DEFINE_SPINLOCK(debugtrace_lock);
 integer_param("debugtrace", debugtrace_kilobytes);
 
+int debugtrace_dump_guest(unsigned int idx, ssize_t len,
+                          XEN_GUEST_HANDLE_PARAM(char) buffer)
+{
+    unsigned int i;
+    const char *p, *q;
+    unsigned long flags;
+
+    if ( (debugtrace_bytes == 0) || !debugtrace_used )
+        return 0;
+
+    if ( idx > debugtrace_bytes )
+        return -E2BIG;
+
+    watchdog_disable();
+    spin_lock_irqsave(&debugtrace_lock, flags);
+
+    q = p = &debugtrace_buf[idx];
+    for ( i = 0; *p != '\0' && i < len; p++, i++ )
+        ;
+
+    spin_unlock_irqrestore(&debugtrace_lock, flags);
+    watchdog_enable();
+
+    if ( i )
+        copy_to_guest(buffer, q, i);
+
+    return idx + i;
+}
+
 static void debugtrace_dump_worker(void)
 {
     if ( (debugtrace_bytes == 0) || !debugtrace_used )

@@ -6,6 +6,7 @@
 #include <xen/types.h>
 #include <xen/xmalloc.h>
 #include <xen/string.h>
+#include <xen/errno.h>
 #include <asm/bug.h>
 
 #define BUG_ON(p)  do { if (unlikely(p)) BUG();  } while (0)
@@ -67,9 +68,20 @@ int parse_bool(const char *s);
 extern void debugtrace_dump(void);
 extern void debugtrace_printk(const char *fmt, ...)
     __attribute__ ((format (printf, 1, 2)));
+extern int debugtrace_dump_guest(unsigned int idx, ssize_t len,
+                                 XEN_GUEST_HANDLE_PARAM(char) buffer);
 #else
 #define debugtrace_dump()          ((void)0)
 #define debugtrace_printk(_f, ...) ((void)0)
+/*
+ * - * This ... is done so that we don't pull in the headers for
+ *   - * the XEN_GUEST_ business.
+ *   - */
+static inline int debugtrace_dump_guest(unsigned int idx,/* ssize_t len,
+                          XEN_GUEST_HANDLE_PARAM(char) buffer*/...)
+{
+    return -ENOSYS;
+}
 #endif
 
 /* Allows us to use '%p' as general-purpose machine-word format char. */
