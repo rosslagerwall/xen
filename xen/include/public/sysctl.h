@@ -905,6 +905,36 @@ struct xen_sysctl_xsplice_action {
 typedef struct xen_sysctl_xsplice_action xen_sysctl_xsplice_action_t;
 DEFINE_XEN_GUEST_HANDLE(xen_sysctl_xsplice_action_t);
 
+/*
+ * Retrieve information useful for patching tools.
+ */
+#define XEN_SYSCTL_XSPLICE_INFO 4
+/* Clear the hypervisor patching trace. */
+#define XEN_SYSCTL_XSPLICE_INFO_TRACE_CLEAR 0
+/* Retrieve the trace. Return value will be the number of bytes retrieved.
+ * Zero means end of trace.
+ */
+#define XEN_SYSCTL_XSPLICE_INFO_TRACE_GET   1
+
+struct xen_xsplice_trace {
+    uint32_t size;                          /* IN: Size of info. */
+    uint32_t idx;                           /* IN: Index in trace (initially
+                                               is zero. */
+    XEN_GUEST_HANDLE_64(char) info;         /* OUT: To fill out with trace.*/
+};
+typedef struct xen_xsplice_trace xen_xsplice_trace_t;
+DEFINE_XEN_GUEST_HANDLE(xen_xsplice_trace_t);
+
+struct xen_sysctl_xsplice_info {
+    uint32_t cmd;                           /* IN: XEN_SYSCTL_XSPLICE_INFO_* */
+    uint32_t _pad;                          /* IN: Must be zero. */
+    union {
+        xen_xsplice_trace_t trace;          /* IN/OUT: Requested information. */
+    } u;
+};
+typedef struct xen_sysctl_xsplice_info xen_sysctl_xsplice_info_t;
+DEFINE_XEN_GUEST_HANDLE(xen_sysctl_xsplice_info_t);
+
 struct xen_sysctl_xsplice_op {
     uint32_t cmd;                           /* IN: XEN_SYSCTL_XSPLICE_* */
     uint32_t _pad;                          /* IN: Always zero. */
@@ -913,6 +943,7 @@ struct xen_sysctl_xsplice_op {
         xen_sysctl_xsplice_list_t list;
         xen_sysctl_xsplice_summary_t get;
         xen_sysctl_xsplice_action_t action;
+        xen_sysctl_xsplice_info_t info;
     } u;
 };
 typedef struct xen_sysctl_xsplice_op xen_sysctl_xsplice_op_t;

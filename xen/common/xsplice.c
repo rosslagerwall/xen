@@ -70,6 +70,27 @@ static const char *status2str(int64_t status)
     return names[status];
 }
 
+#ifdef DEBUG_TRACE_DUMP
+static const char *action2str(uint32_t action)
+{
+#define ACTION(x) [XSPLICE_ACTION_##x] = #x
+    static const char *const names[] = {
+            ACTION(CHECK),
+            ACTION(APPLY),
+            ACTION(REVERT),
+            ACTION(UNLOAD),
+    };
+#undef ACTION
+    if (action >= ARRAY_SIZE(names))
+        return "unknown";
+
+    if (!names[action])
+        return "unknown";
+
+    return names[action];
+}
+#endif
+
 void xsplice_printall(unsigned char key)
 {
     struct payload *data;
@@ -175,6 +196,7 @@ static void __free_payload(struct payload *data)
     payload_cnt --;
     payload_version ++;
     tasklet_kill(&data->tasklet);
+    debugtrace_printk("%s=freed\n", data->id);
     free_xenheap_pages(data, get_order_from_bytes(data->len));
 }
 
@@ -182,6 +204,7 @@ static void xsplice_tasklet(unsigned long _data)
 {
     struct payload *data = (struct payload *)_data;
 
+    debugtrace_printk("%s=%s \n", data->id, action2str(data->cmd));
     spin_lock(&data->cmd_lock);
     switch ( data->cmd ) {
     case XSPLICE_ACTION_CHECK:
@@ -245,6 +268,7 @@ static int xsplice_upload(xen_sysctl_xsplice_upload_t *upload)
     if ( copy_from_guest(data->id, upload->id.name, upload->id.size) )
         goto err_out;
 
+    debugtrace_printk("%s=loaded\n", data->id);
     data->status = XSPLICE_STATUS_LOADED;
     INIT_LIST_HEAD(&data->list);
     spin_lock_init(&data->cmd_lock);
@@ -435,6 +459,39 @@ static int xsplice_action(xen_sysctl_xsplice_action_t *action)
     return_where( rc);
 }
 
+static int xsplice_info(xen_sysctl_xsplice_info_t *info)
+{
+    struct xen_xsplice_trace *trace;
+    int rc = 0;
+
+    if ( info->cmd != XEN_SYSCTL_XSPLICE_INFO_TRACE_CLEAR ||
+         info->cmd != XEN_SYSCTL_XSPLICE_INFO_TRACE_GET )
+        return -EINVAL;
+
+    if ( info->_pad == 0 )
+        return -EINVAL;
+
+    switch ( info->cmd )
+    {
+    case XEN_SYSCTL_XSPLICE_INFO_TRACE_CLEAR:
+        debugtrace_dump();
+        break;
+
+    case XEN_SYSCTL_XSPLICE_INFO_TRACE_GET:
+        trace = &info->u.trace;
+
+        if ( trace->size == 0 )
+            return -EINVAL;
+
+        if ( !guest_handle_okay(trace->info, trace->size) )
+            return -EFAULT;
+
+        rc = debugtrace_dump_guest(trace->idx, trace->size, trace->info);
+        break;
+    }
+    return rc;
+}
+
 int xsplice_control(xen_sysctl_xsplice_op_t *xsplice)
 {
     int rc;
@@ -452,6 +509,9 @@ int xsplice_control(xen_sysctl_xsplice_op_t *xsplice)
         break;
     case XEN_SYSCTL_XSPLICE_ACTION:
         rc = xsplice_action(&xsplice->u.action);
+        break;
+    case XEN_SYSCTL_XSPLICE_INFO:
+        rc = xsplice_info(&xsplice->u.info);
         break;
     default:
         rc = -ENOSYS;
