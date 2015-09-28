@@ -2874,6 +2874,10 @@ int xc_xsplice_apply(xc_interface *xch, char *id);
 int xc_xsplice_revert(xc_interface *xch, char *id);
 int xc_xsplice_unload(xc_interface *xch, char *id);
 int xc_xsplice_check(xc_interface *xch, char *id);
+int xc_xsplice_trace(xc_interface *xch, unsigned int idx, char *info,
+                     unsigned int max);
+
+int xc_xsplice_trace_clear(xc_interface *xch);
 
 #endif /* XENCTRL_H */
 

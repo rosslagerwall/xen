@@ -995,6 +995,49 @@ int xc_xsplice_check(xc_interface *xch, char *id)
     return _xc_xsplice_action(xch, id, XSPLICE_ACTION_CHECK);
 }
 
+int xc_xsplice_trace(xc_interface *xch, unsigned int idx, char *info,
+                     unsigned int max)
+{
+    int rc;
+    DECLARE_SYSCTL;
+    DECLARE_HYPERCALL_BOUNCE(info, max, XC_HYPERCALL_BUFFER_BOUNCE_OUT);
+
+    if ( !info || !max )
+        return -1;
+
+    if ( xc_hypercall_bounce_pre(xch, info) )
+        return -1;
+
+    sysctl.cmd = XEN_SYSCTL_xsplice_op;
+    sysctl.u.xsplice.cmd = XEN_SYSCTL_XSPLICE_INFO;
+
+    sysctl.u.xsplice.u.info.cmd = XEN_SYSCTL_XSPLICE_INFO_TRACE_GET;
+    sysctl.u.xsplice.u.info._pad = 0;
+    sysctl.u.xsplice.u.info.u.trace.size = max;
+    sysctl.u.xsplice.u.info.u.trace.idx = idx;
+
+    set_xen_guest_handle(sysctl.u.xsplice.u.info.u.trace.info, info);
+
+    rc = do_sysctl(xch, &sysctl);
+
+    xc_hypercall_bounce_post(xch, info);
+
+    return rc;
+}
+
+int xc_xsplice_trace_clear(xc_interface *xch)
+{
+    DECLARE_SYSCTL;
+
+    sysctl.cmd = XEN_SYSCTL_xsplice_op;
+    sysctl.u.xsplice.cmd = XEN_SYSCTL_XSPLICE_INFO;
+
+    sysctl.u.xsplice.u.info.cmd = XEN_SYSCTL_XSPLICE_INFO_TRACE_CLEAR;
+    sysctl.u.xsplice.u.info._pad = 0;
+
+    return do_sysctl(xch, &sysctl);
+}
+
 /*
  * Local variables:
  * mode: C
