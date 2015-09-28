@@ -18,6 +18,7 @@
 
 #include <asm/event.h>
 
+#define return_where(x) { printk("%s:%d err=%d\n", __func__,__LINE__, x); return x; }
 static DEFINE_SPINLOCK(payload_list_lock);
 static LIST_HEAD(payload_list);
 
@@ -85,13 +86,13 @@ void xsplice_printall(unsigned char key)
 static int verify_id(xen_xsplice_id_t *id)
 {
     if ( id->size == 0 || id->size > XEN_XSPLICE_ID_SIZE )
-        return -EINVAL;
+        return_where( -EINVAL);
 
     if ( id->_pad != 0 )
-        return -EINVAL;
+        return_where( -EINVAL);
 
     if ( !guest_handle_okay(id->name, id->size) )
-        return -EINVAL;
+        return_where( -EINVAL);
 
     return 0;
 }
@@ -105,11 +106,11 @@ int find_payload(xen_xsplice_id_t *id, bool_t need_lock, struct payload **f)
 
     rc = verify_id(id);
     if ( rc )
-        return rc;
+        return_where( rc);
 
     str = guest_handle_cast(id->name, char);
     if ( copy_from_guest(name, str, id->size) )
-        return -EFAULT;
+        return_where( -EFAULT);
 
     if ( need_lock )
         spin_lock(&payload_list_lock);
@@ -128,20 +129,20 @@ int find_payload(xen_xsplice_id_t *id, bool_t need_lock, struct payload **f)
     if ( need_lock )
         spin_unlock(&payload_list_lock);
 
-    return rc;
+    return_where( rc);
 }
 
 
 static int verify_payload(xen_sysctl_xsplice_upload_t *upload)
 {
     if ( verify_id(&upload->id) )
-        return -EINVAL;
+        return_where( -EINVAL);
 
     if ( upload->size == 0 )
-        return -EINVAL;
+        return_where( -EINVAL);
 
     if ( !guest_handle_okay(upload->payload, upload->size) )
-        return -EFAULT;
+        return_where( -EFAULT);
 
     return 0;
 }
@@ -190,14 +191,14 @@ static int xsplice_upload(xen_sysctl_xsplice_upload_t *upload)
 
     rc = verify_payload(upload);
     if ( rc )
-        return rc;
+        return_where( rc);
 
     rc = find_payload(&upload->id, true, &data);
     if ( rc == 0 /* Found. */ )
-        return -EEXIST;
+        return_where( -EEXIST);
 
     if ( rc != -ENOENT )
-        return rc;
+        return_where( rc);
 
     /*
      * Compute the size of the structures which need to be verified.
@@ -250,18 +251,18 @@ static int xsplice_get(xen_sysctl_xsplice_summary_t *summary)
     int rc;
 
     if ( summary->status.status )
-        return -EINVAL;
+        return_where( -EINVAL);
 
     if ( summary->status._pad != 0 )
-        return -EINVAL;
+        return_where( -EINVAL);
 
     rc = verify_id(&summary->id );
     if ( rc )
-        return rc;
+        return_where( rc);
 
     rc = find_payload(&summary->id, true, &data);
     if ( rc )
-        return rc;
+        return_where( rc);
 
     summary->status.status = data->status;
 
@@ -281,23 +282,23 @@ static int xsplice_list(xen_sysctl_xsplice_list_t *list)
         return -E2BIG;
 
     if ( list->_pad != 0 )
-        return -EINVAL;
+        return_where( -EINVAL);
 
     if ( guest_handle_is_null(list->status) ||
          guest_handle_is_null(list->id) ||
          guest_handle_is_null(list->len) )
-        return -EINVAL;
+        return_where( -EINVAL);
 
     if ( !guest_handle_okay(list->status, sizeof(status) * list->nr) ||
          !guest_handle_okay(list->id, XEN_XSPLICE_ID_SIZE * list->nr) ||
          !guest_handle_okay(list->len, sizeof(uint32_t) * list->nr) )
-        return -EINVAL;
+        return_where( -EINVAL);
 
     spin_lock(&payload_list_lock);
     if ( list->idx > payload_cnt )
     {
         spin_unlock(&payload_list_lock);
-        return -EINVAL;
+        return_where( -EINVAL);
     }
 
     status._pad = 0; /* No stack leaking. */
@@ -340,7 +341,7 @@ static int xsplice_action(xen_sysctl_xsplice_action_t *action)
     int rc;
 
     if ( action->_pad != 0 )
-        return -EINVAL;
+        return_where( -EINVAL);
 
     rc = verify_id(&action->id);
     if ( rc )
@@ -412,7 +413,7 @@ static int xsplice_action(xen_sysctl_xsplice_action_t *action)
  out:
     spin_unlock(&payload_list_lock);
 
-    return rc;
+    return_where( rc);
 }
 
 int xsplice_control(xen_sysctl_xsplice_op_t *xsplice)
