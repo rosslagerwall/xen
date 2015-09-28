@@ -191,6 +191,7 @@ struct xsm_operations {
     int (*ioport_mapping) (struct domain *d, uint32_t s, uint32_t e, uint8_t allow);
     int (*pmu_op) (struct domain *d, unsigned int op);
 #endif
+    int (*version_op) (uint32_t cmd);
 };
 
 #ifdef XSM_ENABLE
@@ -725,6 +726,11 @@ static inline int xsm_ioport_mapping (xsm_default_t def, struct domain *d, uint3
 static inline int xsm_pmu_op (xsm_default_t def, struct domain *d, unsigned int op)
 {
     return xsm_ops->pmu_op(d, op);
+}
+
+static inline int xsm_version_op (xsm_default_t def, uint32_t op)
+{
+    return xsm_ops->version_op(op);
 }
 
 #endif /* CONFIG_X86 */

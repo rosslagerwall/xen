@@ -5272,6 +5272,7 @@ const libxl_version_info* libxl_get_version_info(libxl_ctx *ctx)
     xc_version(ctx->xch, XENVER_extraversion, &u.xen_extra);
     info->xen_version_extra = strdup(u.xen_extra);
 
+    memset(&u.xen_cc, 0, sizeof(xen_compile_info_t));
     xc_version(ctx->xch, XENVER_compile_info, &u.xen_cc);
     info->compiler = strdup(u.xen_cc.compiler);
     info->compile_by = strdup(u.xen_cc.compile_by);
@@ -5281,6 +5282,7 @@ const libxl_version_info* libxl_get_version_info(libxl_ctx *ctx)
     xc_version(ctx->xch, XENVER_capabilities, &u.xen_caps);
     info->capabilities = strdup(u.xen_caps);
 
+    memset(&u.xen_cc, 0, sizeof(xen_changeset_info_t));
     xc_version(ctx->xch, XENVER_changeset, &u.xen_chgset);
     info->changeset = strdup(u.xen_chgset);
 
@@ -5289,6 +5291,7 @@ const libxl_version_info* libxl_get_version_info(libxl_ctx *ctx)
 
     info->pagesize = xc_version(ctx->xch, XENVER_pagesize, NULL);
 
+    memset(&u.xen_commandline, 0, sizeof(xen_commandline_t));
     xc_version(ctx->xch, XENVER_commandline, &u.xen_commandline);
     info->commandline = strdup(u.xen_commandline);
 
