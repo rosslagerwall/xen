@@ -720,4 +720,28 @@ static XSM_INLINE int xsm_pmu_op (XSM_DEFAULT_ARG struct domain *d, unsigned int
     }
 }
 
+#include <public/version.h>
+static XSM_INLINE int xsm_version_op (XSM_DEFAULT_ARG uint32_t op)
+{
+    XSM_ASSERT_ACTION(XSM_PRIV);
+    switch ( op )
+    {
+    case XENVER_compile_info:
+    case XENVER_changeset:
+    case XENVER_commandline:
+        return xsm_default_action(XSM_PRIV, current->domain, NULL);
+    case XENVER_version:
+    case XENVER_extraversion:
+    case XENVER_capabilities:
+    case XENVER_platform_parameters:
+    case XENVER_get_features:
+    case XENVER_pagesize:
+    case XENVER_guest_handle:
+        /* The should _NEVER_ get here, but just in case. */
+        return xsm_default_action(XSM_HOOK, current->domain, NULL);
+    default:
+        return -EPERM;
+    }
+}
+
 #endif /* CONFIG_X86 */

@@ -26,6 +26,7 @@
 #include <public/xen.h>
 #include <public/physdev.h>
 #include <public/platform.h>
+#include <public/version.h>
 
 #include <public/xsm/flask_op.h>
 
@@ -1625,6 +1626,29 @@ static int flask_pmu_op (struct domain *d, unsigned int op)
 }
 #endif /* CONFIG_X86 */
 
+static int flask_version_op (uint32_t op)
+{
+    switch ( op )
+    {
+    case XENVER_compile_info:
+    case XENVER_changeset:
+    case XENVER_commandline:
+        return current_has_perm(current->domain, SECCLASS_DOMAIN2,
+                                DOMAIN2__VERSION_USE);
+    case XENVER_version:
+    case XENVER_extraversion:
+    case XENVER_capabilities:
+    case XENVER_platform_parameters:
+    case XENVER_get_features:
+    case XENVER_pagesize:
+    case XENVER_guest_handle:
+        /* The XSM check is only for a subset of ops. The rest are allowed. */
+        return 0;
+    default:
+        return -EPERM;
+    }
+}
+
 long do_flask_op(XEN_GUEST_HANDLE_PARAM(xsm_op_t) u_flask_op);
 int compat_flask_op(XEN_GUEST_HANDLE_PARAM(xsm_op_t) u_flask_op);
 
@@ -1763,6 +1787,7 @@ static struct xsm_operations flask_ops = {
     .ioport_mapping = flask_ioport_mapping,
     .pmu_op = flask_pmu_op,
 #endif
+    .version_op = flask_version_op,
 };
 
 static __init void flask_init(void)

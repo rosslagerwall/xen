@@ -13,6 +13,7 @@
 #include <xen/nmi.h>
 #include <xen/guest_access.h>
 #include <xen/hypercall.h>
+#include <xsm/xsm.h>
 #include <asm/current.h>
 #include <public/nmi.h>
 #include <public/version.h>
@@ -226,9 +227,17 @@ void __init do_initcalls(void)
 /*
  * Simple hypercalls.
  */
-
+#define XENVER_CMD_XSM_CHECK    ( (1U << XENVER_compile_info) | \
+                                  (1U << XENVER_changeset) | \
+                                  (1U << XENVER_commandline) )
 DO(xen_version)(int cmd, XEN_GUEST_HANDLE_PARAM(void) arg)
 {
+    if ( ( 1 << cmd ) & XENVER_CMD_XSM_CHECK )
+    {
+        int rc = xsm_version_op(XSM_PRIV, cmd);
+        if ( rc )
+            return rc;
+    }
     switch ( cmd )
     {
     case XENVER_version:

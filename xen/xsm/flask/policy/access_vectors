@@ -244,6 +244,8 @@ class domain2
     mem_sharing
 # XEN_DOMCTL_psr_cat_op
     psr_cat_op
+# XENVER_[compile_info|changeset|commandline] usage. The rest is not checked.
+   version_use
 }
 
 # Similar to class domain, but primarily contains domctls related to HVM domains
