@@ -968,31 +968,40 @@ Retrieve information useful for the patching tools.
 The calleer provides:
 
  * `cmd` The command of the sub-command requested, which can be:
-   * **XEN_SYSCTL_XSPLICE_INFO_BUILD_ID** (0) - which request the build-id
-   of the hypervisor.
-   * **XEN_SYSCTL_XSPLICE_INFO_TRACE_CLEAR** (1) - clear the hypervisor
+   * **XEN_SYSCTL_XSPLICE_INFO_TRACE_CLEAR** (0) - clear the hypervisor
     patching trace.
-   * **XEN_SYSCTL_XSPLICE_INFO_TRACE_GET** (2) - retrieve the trace. The
+   * **XEN_SYSCTL_XSPLICE_INFO_TRACE_GET** (1) - retrieve the trace. The
     return value will be the number of bytes retrieved. Zero means end of trace.
- * `size` - The size of the `info` char array. *MUST* not be zero.
- * `info` - virtual address where to write requested information.
-    *MUST* not be zero.
+ * `_pad` - *MUST* be zero.
+ * A 'struct xen_xsplice_trace` which has:
+   * `size` - The size of the `info` char array. *MUST* not be zero.
+   * `info` - virtual address where to write requested information.  *MUST* not be zero.
+   * `idx` - index of trace. Initially this *MUST* be zero. Subsequent calls would
+     would be the return value from the previous call.
 
 On completion if the return value contains an positive value it signifies
-that this many bytes were written into `info`.
+how many bytes were written into `info`.
 
 The return value can also be EXX format. EINVAL if incorrect values have been provided,
 ENOENT the requested information cannot be supplied, or any other error occurred.
 
 The structure is as a follow:
 <pre>
-#define XEN_SYSCTL_XSPLICE_INFO_BUILD_ID 0  
+#define XEN_SYSCTL_XSPLICE_INFO_TRACE_CLEAR 0  
+#define XEN_SYSCTL_XSPLICE_INFO_TRACE_GET   1  
+
+struct xen_xsplice_trace {  
+    uint32_t size;                          /* IN: Size of info */  
+    uint32_t idx;                           /* IN: Index in trace (initially  
+                                               is zero. */  
+    XEN_GUEST_HANDLE_64(char) info;         /* OUT: To fill out with trace.*/  
+};  
+
 struct xen_sysctl_xsplice_info {  
     uint32_t cmd;                           /* IN: XEN_SYSCTL_XSPLICE_INFO_* */  
-    uint32_t size;                          /* IN: Size of info: OUT: Amount of  
-                                               bytes filed out in info. */  
+    uint32_t _pad;                          /* IN: Must be zero. */  
     union {  
-        XEN_GUEST_HANDLE_64(char) info;     /* OUT: Requested information. */  
+        xen_xsplice_trace_t trace;          /* IN/OUT: Requested information. */  
     } u;  
 };  
 </pre>
