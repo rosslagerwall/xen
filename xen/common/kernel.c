@@ -230,7 +230,8 @@ void __init do_initcalls(void)
 #define XENVER_CMD_XSM_CHECK    ( (1U << XENVER_compile_info) | \
                                   (1U << XENVER_changeset) | \
                                   (1U << XENVER_commandline) )
-DO(xen_version)(int cmd, XEN_GUEST_HANDLE_PARAM(void) arg)
+DO(xen_version)(int cmd, XEN_GUEST_HANDLE_PARAM(void) arg,
+                unsigned int len)
 {
     if ( ( 1 << cmd ) & XENVER_CMD_XSM_CHECK )
     {

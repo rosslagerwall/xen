@@ -83,7 +83,8 @@ do_event_channel_op(
 extern long
 do_xen_version(
     int cmd,
-    XEN_GUEST_HANDLE_PARAM(void) arg);
+    XEN_GUEST_HANDLE_PARAM(void) arg,
+    unsigned int len);
 
 extern long
 do_console_io(
@@ -168,7 +169,8 @@ compat_xenoprof_op(int op, XEN_GUEST_HANDLE_PARAM(void) arg);
 extern int
 compat_xen_version(
     int cmd,
-    XEN_GUEST_HANDLE_PARAM(void) arg);
+    XEN_GUEST_HANDLE_PARAM(void) arg,
+    unsigned int len);
 
 extern int
 compat_sched_op(
