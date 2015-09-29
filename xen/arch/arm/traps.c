@@ -1223,7 +1223,7 @@ static arm_hypercall_t arm_hypercall_table[] = {
     HYPERCALL(sched_op, 2),
     HYPERCALL_DEPRECATED(sched_op_compat, 2),
     HYPERCALL(console_io, 3),
-    HYPERCALL(xen_version, 2),
+    HYPERCALL(xen_version, 3),
     HYPERCALL(xsm_op, 1),
     HYPERCALL(event_channel_op, 2),
     HYPERCALL_DEPRECATED(event_channel_op_compat, 1),
