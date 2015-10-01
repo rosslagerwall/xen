@@ -23,7 +23,8 @@ void show_help(void)
             "  apply <id>           apply <id> patch.\n"
             "  revert <id>          revert id <id> patch.\n"
             "  unload <id>          unload id <id> patch.\n"
-            "  check <id>           check id <id> patch.\n",
+            "  check <id>           check id <id> patch.\n"
+            "  trace [clear]        get the trace from hypervisor.\n",
             XEN_XSPLICE_ID_SIZE);
 }
 
@@ -362,7 +363,6 @@ unload:
     return rc;
 }
 
-
 #define MAX_LEN 1024
 static int build_id_func(int argc, char *argv[])
 {
@@ -399,6 +399,39 @@ static int build_id_func(int argc, char *argv[])
 }
 #undef MAX_LEN
 
+#define MAX_LEN 1024
+static int trace_func(int argc, char *argv[])
+{
+    char trace[MAX_LEN];
+    int rc;
+    unsigned int idx;
+
+    if ( argc )
+    {
+        if ( strcmp(argv[0], "clear") != 0 )
+        {
+            show_help();
+            return -1;
+        }
+        return xc_xsplice_trace_clear(xch);
+    }
+
+    rc = idx = 0;
+    fprintf(stdout,"----------------------------------------+------------\n");
+    do {
+        memset(trace, 0, sizeof(trace));
+        rc = xc_xsplice_trace(xch, idx, trace, MAX_LEN);
+        if ( rc > 0 )
+        {
+            idx += rc;
+            fprintf(stdout, "%s", trace);
+        }
+    } while ( rc > 0 );
+
+    return rc;
+}
+#undef MAX_LEN
+
 struct {
     const char *name;
     int (*function)(int argc, char *argv[]);
@@ -408,6 +441,7 @@ struct {
     { "build-id", build_id_func },
     { "upload", upload_func },
     { "all", all_func },
+    { "trace", trace_func },
 };
 
 int main(int argc, char *argv[])

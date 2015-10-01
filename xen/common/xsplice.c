@@ -71,6 +71,9 @@ static const char *status2str(int64_t status)
 }
 
 #ifdef DEBUG_TRACE_DUMP
+extern int debugtrace_dump_guest(unsigned int idx, ssize_t len,
+                                 XEN_GUEST_HANDLE_PARAM(char) buffer);
+
 static const char *action2str(uint32_t action)
 {
 #define ACTION(x) [XSPLICE_ACTION_##x] = #x
