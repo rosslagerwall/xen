@@ -13,6 +13,7 @@
 #include <xen/stdbool.h>
 #include <xen/sched.h>
 #include <xen/lib.h>
+#include <xen/version.h>
 #include <xen/xsplice.h>
 #include <public/sysctl.h>
 
@@ -72,6 +73,24 @@ static const char *status2str(int64_t status)
 void xsplice_printall(unsigned char key)
 {
     struct payload *data;
+    char *binary_id = NULL;
+    unsigned int len = 0;
+    int rc;
+
+    rc = xen_build_id(&binary_id, &len);
+    printk("build-id: ");
+    if ( !rc )
+    {
+        unsigned int i;
+
+        for ( i = 0; i < len; i++ )
+        {
+		    uint8_t c = binary_id[i];
+		    printk("%02x", c);
+        }
+	    printk("\n");
+    } else if ( rc < 0 )
+        printk("rc = %d\n", rc);
 
     spin_lock(&payload_list_lock);
 

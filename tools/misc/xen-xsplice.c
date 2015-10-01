@@ -17,6 +17,7 @@ void show_help(void)
             " <id> An unique name of payload. Up to %d characters.\n"
             "Commands:\n"
             "  help                 display this help\n"
+            "  build-id             display build-id of hypervisor.\n"
             "  upload <id> <file>   upload file <cpuid> with <id> name\n"
             "  list                 list payloads uploaded.\n"
             "  apply <id>           apply <id> patch.\n"
@@ -361,12 +362,50 @@ unload:
     return rc;
 }
 
+
+#define MAX_LEN 1024
+static int build_id_func(int argc, char *argv[])
+{
+    char binary_id[MAX_LEN];
+    char ascii_id[MAX_LEN];
+    int rc;
+    unsigned int i;
+
+    if ( argc )
+    {
+        show_help();
+        return -1;
+    }
+
+    memset(binary_id, 0, sizeof(binary_id));
+
+    rc = xc_version_len(xch, XENVER_build_id, binary_id, MAX_LEN);
+    if ( rc < 0 )
+    {
+        printf("Failed to get build_id: %d(%s)\n", errno, strerror(errno));
+        return -1;
+    }
+    /* Convert to printable format. */
+    if ( rc > MAX_LEN )
+        rc = MAX_LEN;
+
+    for ( i = 0; i < rc && (i + 1) * 2 < sizeof(binary_id); i++ )
+        snprintf(&ascii_id[i * 2], 3, "%02hhx", binary_id[i]);
+
+    ascii_id[i*2]='\0';
+    printf("%s", ascii_id);
+
+    return 0;
+}
+#undef MAX_LEN
+
 struct {
     const char *name;
     int (*function)(int argc, char *argv[]);
 } main_options[] = {
     { "help", help_func },
     { "list", list_func },
+    { "build-id", build_id_func },
     { "upload", upload_func },
     { "all", all_func },
 };
