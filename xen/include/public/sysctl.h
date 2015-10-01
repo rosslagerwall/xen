@@ -764,6 +764,160 @@ struct xen_sysctl_tmem_op {
 typedef struct xen_sysctl_tmem_op xen_sysctl_tmem_op_t;
 DEFINE_XEN_GUEST_HANDLE(xen_sysctl_tmem_op_t);
 
+/*
+ * XEN_SYSCTL_XSPLICE_op
+ *
+ * Refer to the docs/misc/xsplice.markdown for the design details
+ * of this hypercall.
+ */
+
+/*
+ * Structure describing an ELF payload. Uniquely identifies the
+ * payload. Should be human readable.
+ * Recommended length is XEN_XSPLICE_ID_SIZE.
+ */
+#define XEN_XSPLICE_ID_SIZE 128
+struct xen_xsplice_id {
+    XEN_GUEST_HANDLE_64(char) name;         /* IN, pointer to name. */
+    uint32_t    size;                       /* IN, size of name. May be upto
+                                               XEN_XSPLICE_ID_SIZE. */
+    uint32_t    _pad;
+};
+typedef struct xen_xsplice_id xen_xsplice_id_t;
+DEFINE_XEN_GUEST_HANDLE(xen_xsplice_id_t);
+
+/*
+ * Upload a payload to the hypervisor. The payload is verified
+ * against basic checks and if there are any issues the proper return code
+ * will be returned. The payload is not applied at this time - that is
+ * controlled by XEN_SYSCTL_XSPLICE_ACTION.
+ *
+ * The return value is zero if the payload was succesfully uploaded.
+ * Otherwise an EXX return value is provided. Duplicate `id` are not supported.
+ * The payload at this point is verified against the basic checks.
+ *
+ * The `payload` is the ELF payload as mentioned in the `Payload format`
+ * section in the xSplice design document.
+ */
+#define XEN_SYSCTL_XSPLICE_UPLOAD 0
+struct xen_sysctl_xsplice_upload {
+    xen_xsplice_id_t id;                    /* IN, name of the patch. */
+    uint64_t    size;                       /* IN, size of the ELF file. */
+    XEN_GUEST_HANDLE_64(uint8) payload;     /* IN, the ELF file. */
+};
+typedef struct xen_sysctl_xsplice_upload xen_sysctl_xsplice_upload_t;
+DEFINE_XEN_GUEST_HANDLE(xen_sysctl_xsplice_upload_t);
+
+/*
+ * Retrieve an status of an specific payload.
+ *
+ * Upon completion the `struct xen_xsplice_status` is updated.
+ *
+ * The return value is zero on success and EXX on failure. This operation
+ * is synchronous and does not require preemption.
+ */
+#define XEN_SYSCTL_XSPLICE_GET 1
+
+struct xen_xsplice_status {
+#define XSPLICE_STATUS_LOADED       0x01
+#define XSPLICE_STATUS_PROGRESS     0x02
+#define XSPLICE_STATUS_CHECKED      0x04
+#define XSPLICE_STATUS_APPLIED      0x08
+#define XSPLICE_STATUS_REVERTED     0x10
+ /* Any negative value is an error. The error would be in -EXX format. */
+	int32_t status;                 /* OUT, On IN has to be zero. */
+    uint32_t _pad;                  /* IN, Must be zero. */
+};
+typedef struct xen_xsplice_status xen_xsplice_status_t;
+DEFINE_XEN_GUEST_HANDLE(xen_xsplice_status_t);
+
+struct xen_sysctl_xsplice_summary {
+    xen_xsplice_id_t id;                    /* IN, name of the payload. */
+    xen_xsplice_status_t status;            /* IN/OUT, status of it. */
+};
+typedef struct xen_sysctl_xsplice_summary xen_sysctl_xsplice_summary_t;
+DEFINE_XEN_GUEST_HANDLE(xen_sysctl_xsplice_summary_t);
+
+/*
+ * Retrieve an array of abbreviated status and names of payloads that are
+ * loaded in the hypervisor.
+ *
+ * If the hypercall returns an positive number, it is the number (up to `nr`)
+ * of the payloads returned, along with `nr` updated with the number of remaining
+ * payloads, `version` updated (it may be the same across hypercalls. If it
+ * varies the data is stale and further calls could fail). The `status`,
+ * `id`, and `len`' are updated at their designed index value (`idx`) with
+ * the returned value of data.
+ *
+ * If the hypercall returns E2BIG the `count` is too big and should be
+ * lowered.
+ *
+ * This operation can be preempted by the hypercall returning EAGAIN.
+ * Retry.
+ *
+ * Note that due to the asynchronous nature of hypercalls the domain might have
+ * added or removed the number of payloads making this information stale. It is
+ * the responsibility of the toolstack to use the `version` field to check
+ * between each invocation. if the version differs it should discard the stale
+ * data and start from scratch. It is OK for the toolstack to use the new
+ * `version` field.
+ */
+#define XEN_SYSCTL_XSPLICE_LIST 2
+struct xen_sysctl_xsplice_list {
+    uint32_t version;                       /* IN/OUT: Initially *MUST* be zero.
+                                               On subsequent calls reuse value.
+                                               If varies between calls, we are
+                                             * getting stale data. */
+    uint32_t idx;                           /* IN/OUT: Index into array. */
+    uint32_t nr;                            /* IN: How many status, id, and len
+                                               should populate.
+                                               OUT: How many payloads left. */
+    uint32_t _pad;                          /* IN: Must be zero. */
+    XEN_GUEST_HANDLE_64(xen_xsplice_status_t) status;  /* OUT. Must have enough
+                                               space allocate for n of them. */
+    XEN_GUEST_HANDLE_64(char) id;           /* OUT: Array of ids. Each member
+                                               MUST XEN_XSPLICE_ID_SIZE in size.
+                                               Must have n of them. */
+    XEN_GUEST_HANDLE_64(uint32) len;        /* OUT: Array of lengths of ids.
+                                               Must have n of them. */
+};
+typedef struct xen_sysctl_xsplice_list xen_sysctl_xsplice_list_t;
+DEFINE_XEN_GUEST_HANDLE(xen_sysctl_xsplice_list_t);
+
+/*
+ * Perform an operation on the payload structure referenced by the `id` field.
+ * The operation request is asynchronous and the status should be retrieved
+ * by using either XEN_SYSCTL_XSPLICE_GET or XEN_SYSCTL_XSPLICE_LIST hypercall.
+ * If the operation fails more details on the operation can be retrieved via
+ * XEN_SYSCTL_XSPLICE_INFO hypercall.
+ */
+#define XEN_SYSCTL_XSPLICE_ACTION 3
+struct xen_sysctl_xsplice_action {
+    xen_xsplice_id_t id;                    /* IN, name of the patch. */
+#define XSPLICE_ACTION_CHECK        1
+#define XSPLICE_ACTION_UNLOAD       2
+#define XSPLICE_ACTION_REVERT       3
+#define XSPLICE_ACTION_APPLY        4
+    uint32_t    cmd;                        /* IN: XSPLICE_ACTION_*. */
+    uint32_t    _pad;                       /* IN: Always zero. */
+    uint64_aligned_t time;                  /* IN: Zero if no timeout. */
+};
+typedef struct xen_sysctl_xsplice_action xen_sysctl_xsplice_action_t;
+DEFINE_XEN_GUEST_HANDLE(xen_sysctl_xsplice_action_t);
+
+struct xen_sysctl_xsplice_op {
+    uint32_t cmd;                           /* IN: XEN_SYSCTL_XSPLICE_* */
+    uint32_t _pad;                          /* IN: Always zero. */
+    union {
+        xen_sysctl_xsplice_upload_t upload;
+        xen_sysctl_xsplice_list_t list;
+        xen_sysctl_xsplice_summary_t get;
+        xen_sysctl_xsplice_action_t action;
+    } u;
+};
+typedef struct xen_sysctl_xsplice_op xen_sysctl_xsplice_op_t;
+DEFINE_XEN_GUEST_HANDLE(xen_sysctl_xsplice_op_t);
+
 struct xen_sysctl {
     uint32_t cmd;
 #define XEN_SYSCTL_readconsole                    1
@@ -789,6 +943,7 @@ struct xen_sysctl {
 #define XEN_SYSCTL_pcitopoinfo                   22
 #define XEN_SYSCTL_psr_cat_op                    23
 #define XEN_SYSCTL_tmem_op                       24
+#define XEN_SYSCTL_xsplice_op                    25
     uint32_t interface_version; /* XEN_SYSCTL_INTERFACE_VERSION */
     union {
         struct xen_sysctl_readconsole       readconsole;
@@ -814,6 +969,7 @@ struct xen_sysctl {
         struct xen_sysctl_psr_cmt_op        psr_cmt_op;
         struct xen_sysctl_psr_cat_op        psr_cat_op;
         struct xen_sysctl_tmem_op           tmem_op;
+        struct xen_sysctl_xsplice_op        xsplice;
         uint8_t                             pad[128];
     } u;
 };
