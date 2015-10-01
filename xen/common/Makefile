@@ -56,6 +56,7 @@ obj-y += vmap.o
 obj-y += vsprintf.o
 obj-y += wait.o
 obj-y += xmalloc_tlsf.o
+obj-y += xsplice.o
 
 obj-bin-$(CONFIG_X86) += $(foreach n,decompress bunzip2 unxz unlzma unlzo unlz4 earlycpio,$(n).init.o)
 
