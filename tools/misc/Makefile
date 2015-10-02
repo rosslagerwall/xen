@@ -31,6 +31,7 @@ INSTALL_SBIN                   += xenperf
 INSTALL_SBIN                   += xenpm
 INSTALL_SBIN                   += xenwatchdogd
 INSTALL_SBIN                   += xen-xsplice
+INSTALL_SBIN                   += validate_xsplice
 INSTALL_SBIN += $(INSTALL_SBIN-y)
 
 # Everything to be installed in a private bin/
@@ -111,6 +112,10 @@ gtraceview: gtraceview.o
 
 xencov: xencov.o
 	$(CC) $(LDFLAGS) -o $@ $< $(LDLIBS_libxenctrl) $(APPEND_LDFLAGS)
+
+validate_xsplice: validate_xsplice.o
+	$(CC) $(LDFLAGS) -o $@ $< $(LDLIBS_libxenctrl) $(APPEND_LDFLAGS) \
+	-I../../xen/common/libelf ../libxc/libelf-tools.o ../libxc/libelf-loader.o ../libxc/libelf-dominfo.o
 
 xen_extra_version.xsplice: xen_extra_version.c
 	# TODO: Extract build-id, right now we just extract the ELF note, but not
