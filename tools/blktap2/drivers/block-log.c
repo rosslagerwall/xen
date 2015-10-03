@@ -359,7 +359,7 @@ static int ctl_close_sock(struct tdlog_state* s, int fd)
 {
   int i;
 
-  for (i = 0; i < s->connected; i++) {
+  for (i = 0; i < s->connected && i < MAX_CONNECTIONS; i++) {
     if (s->connections[i].fd == fd) {
       tapdisk_server_unregister_event(s->connections[i].id);
       close(s->connections[i].fd);
@@ -545,7 +545,7 @@ static inline int ctl_find_connection(struct tdlog_state *s, event_id_t id)
 {
   int i;
 
-  for (i = 0; i < s->connected; i++)
+  for (i = 0; i < s->connected && i < MAX_CONNECTIONS; i++)
     if (s->connections[i].id == id)
       return s->connections[i].fd;
 
