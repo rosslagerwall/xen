@@ -27,14 +27,28 @@ elf_errorstatus elf_init(struct elf_binary *elf, const char *image_input, size_t
 {
     ELF_HANDLE_DECL(elf_shdr) shdr;
     uint64_t i, count, section, offset;
+#ifndef __XEN__
+    elf_log_callback *callback;
+    void *log_callback_data;
+#endif
+    int verbose;
 
     if ( !elf_is_elfbinary(image_input, size) )
     {
         elf_err(elf, "%s: not an ELF binary\n", __FUNCTION__);
         return -1;
     }
-
+#ifndef __XEN__
+    callback = elf->log_callback;
+    log_callback_data = elf->log_caller_data;
+#endif
+    verbose = elf->verbose;
     elf_memset_unchecked(elf, 0, sizeof(*elf));
+#ifndef __XEN__
+    elf->log_callback = callback;
+    elf->log_caller_data = log_callback_data;
+#endif
+    elf->verbose = verbose;
     elf->image_base = image_input;
     elf->size = size;
     elf->ehdr = ELF_MAKE_HANDLE(elf_ehdr, (elf_ptrval)image_input);
