@@ -5249,6 +5249,7 @@ libxl_numainfo *libxl_get_numainfo(libxl_ctx *ctx, int *nr)
     return ret;
 }
 
+#define BUILD_ID_LEN 1024 /* Same size as xen_commandline. */
 const libxl_version_info* libxl_get_version_info(libxl_ctx *ctx)
 {
     union {
@@ -5258,8 +5259,10 @@ const libxl_version_info* libxl_get_version_info(libxl_ctx *ctx)
         xen_capabilities_info_t xen_caps;
         xen_platform_parameters_t p_parms;
         xen_commandline_t xen_commandline;
+        char build_id[BUILD_ID_LEN];
     } u;
     long xen_version;
+    int rc;
     libxl_version_info *info = &ctx->version_info;
 
     if (info->xen_version_extra != NULL)
@@ -5295,8 +5298,21 @@ const libxl_version_info* libxl_get_version_info(libxl_ctx *ctx)
     xc_version(ctx->xch, XENVER_commandline, &u.xen_commandline);
     info->commandline = strdup(u.xen_commandline);
 
+    rc = xc_version_len(ctx->xch, XENVER_build_id, &u.build_id, BUILD_ID_LEN);
+    if (rc > 0) {
+        unsigned int i;
+
+        info->build_id = (char *)malloc((rc * 2) + 1);
+
+        for (i = 0; i < rc && (i + 1) * 2 < BUILD_ID_LEN; i++)
+            snprintf(&info->build_id[i * 2], 3, "%02hhx", u.build_id[i]);
+
+        info->build_id[i*2]='\0';
+    } else
+        info->build_id = strdup("");
     return info;
 }
+#undef BUILD_ID_LEN
 
 libxl_vcpuinfo *libxl_list_vcpu(libxl_ctx *ctx, uint32_t domid,
                                        int *nr_vcpus_out, int *nr_cpus_out)
