@@ -1635,6 +1635,9 @@ static int flask_version_op (uint32_t op)
     case XENVER_commandline:
         return current_has_perm(current->domain, SECCLASS_DOMAIN2,
                                 DOMAIN2__VERSION_USE);
+    case XENVER_build_id:
+        return avc_has_perm(domain_sid(current->domain), SECINITSID_XEN,
+                            SECCLASS_XEN2, XEN2__VERSION_PRIV, NULL);
     case XENVER_version:
     case XENVER_extraversion:
     case XENVER_capabilities:

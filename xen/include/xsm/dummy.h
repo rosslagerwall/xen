@@ -729,6 +729,7 @@ static XSM_INLINE int xsm_version_op (XSM_DEFAULT_ARG uint32_t op)
     case XENVER_compile_info:
     case XENVER_changeset:
     case XENVER_commandline:
+    case XENVER_build_id:
         return xsm_default_action(XSM_PRIV, current->domain, NULL);
     case XENVER_version:
     case XENVER_extraversion:

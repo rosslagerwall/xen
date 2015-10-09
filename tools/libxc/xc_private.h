@@ -227,7 +227,8 @@ void xc__hypercall_buffer_cache_release(xc_interface *xch);
 
 int do_xen_hypercall(xc_interface *xch, privcmd_hypercall_t *hypercall);
 
-static inline int do_xen_version(xc_interface *xch, int cmd, xc_hypercall_buffer_t *dest)
+static inline int do_xen_version(xc_interface *xch, int cmd,
+                                 xc_hypercall_buffer_t *dest, size_t len)
 {
     DECLARE_HYPERCALL;
     DECLARE_HYPERCALL_BUFFER_ARGUMENT(dest);
@@ -235,6 +236,7 @@ static inline int do_xen_version(xc_interface *xch, int cmd, xc_hypercall_buffer
     hypercall.op     = __HYPERVISOR_xen_version;
     hypercall.arg[0] = (unsigned long) cmd;
     hypercall.arg[1] = HYPERCALL_BUFFER_AS_ARG(dest);
+    hypercall.arg[2] = len;
 
     return do_xen_hypercall(xch, &hypercall);
 }

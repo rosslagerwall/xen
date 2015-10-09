@@ -674,11 +674,28 @@ int xc_sysctl(xc_interface *xch, struct xen_sysctl *sysctl)
     return do_sysctl(xch, sysctl);
 }
 
+int xc_version_len(xc_interface *xch, int cmd, void *arg, size_t len)
+{
+    DECLARE_HYPERCALL_BOUNCE(arg, len, XC_HYPERCALL_BUFFER_BOUNCE_OUT);
+    int rc;
+
+    if ( (len != 0) && xc_hypercall_bounce_pre(xch, arg) )
+    {
+        PERROR("Could not bounce buffer for version hypercall");
+        return -ENOMEM;
+    }
+
+    rc = do_xen_version(xch, cmd, HYPERCALL_BUFFER(arg), len);
+
+    if ( len != 0 )
+        xc_hypercall_bounce_post(xch, arg);
+
+    return rc;
+}
+
 int xc_version(xc_interface *xch, int cmd, void *arg)
 {
-    DECLARE_HYPERCALL_BOUNCE(arg, 0, XC_HYPERCALL_BUFFER_BOUNCE_OUT); /* Size unknown until cmd decoded */
     size_t sz;
-    int rc;
 
     switch ( cmd )
     {
@@ -716,21 +733,7 @@ int xc_version(xc_interface *xch, int cmd, void *arg)
         ERROR("xc_version: unknown command %d\n", cmd);
         return -EINVAL;
     }
-
-    HYPERCALL_BOUNCE_SET_SIZE(arg, sz);
-
-    if ( (sz != 0) && xc_hypercall_bounce_pre(xch, arg) )
-    {
-        PERROR("Could not bounce buffer for version hypercall");
-        return -ENOMEM;
-    }
-
-    rc = do_xen_version(xch, cmd, HYPERCALL_BUFFER(arg));
-
-    if ( sz != 0 )
-        xc_hypercall_bounce_post(xch, arg);
-
-    return rc;
+    return xc_version_len(xch, cmd, arg, sz);
 }
 
 unsigned long xc_make_page_below_4G(

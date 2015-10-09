@@ -95,6 +95,8 @@ class xen2
     pmu_use
 # XEN_SYSCTL_xsplice_op
     xsplice_op
+# XENVER_build_id and other priv
+    version_priv
 }
 
 # Classes domain and domain2 consist of operations that a domain performs on

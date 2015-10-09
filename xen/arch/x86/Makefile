@@ -110,14 +110,18 @@ $(TARGET)-syms: prelink.o xen.lds $(BASEDIR)/common/symbols-dummy.o
 	$(NM) -pa --format=sysv $(@D)/.$(@F).0 \
 		| $(BASEDIR)/tools/symbols --sysv --sort >$(@D)/.$(@F).0.S
 	$(MAKE) -f $(BASEDIR)/Rules.mk $(@D)/.$(@F).0.o
-	$(LD) $(LDFLAGS) -T xen.lds -N prelink.o \
+	$(LD) $(LDFLAGS) -T xen.lds -N prelink.o --build-id=sha1 \
 	    $(@D)/.$(@F).0.o -o $(@D)/.$(@F).1
 	$(NM) -pa --format=sysv $(@D)/.$(@F).1 \
 		| $(BASEDIR)/tools/symbols --sysv --sort --warn-dup >$(@D)/.$(@F).1.S
 	$(MAKE) -f $(BASEDIR)/Rules.mk $(@D)/.$(@F).1.o
-	$(LD) $(LDFLAGS) -T xen.lds -N prelink.o \
+	$(LD) $(LDFLAGS) -T xen.lds -N prelink.o --build-id=sha1 \
 	    $(@D)/.$(@F).1.o -o $@
 	rm -f $(@D)/.$(@F).[0-9]*
+
+build_id.o: $(TARGET)-syms
+	$(OBJCOPY) --only-section=.note.gnu.build-id $< build_id.o
+
 
 EFI_LDFLAGS = $(patsubst -m%,-mi386pep,$(LDFLAGS)) --subsystem=10
 EFI_LDFLAGS += --image-base=$(1) --stack=0,0 --heap=0,0 --strip-debug
@@ -131,7 +135,7 @@ $(TARGET).efi: VIRT_BASE = 0x$(shell $(NM) efi/relocs-dummy.o | sed -n 's, A VIR
 $(TARGET).efi: ALT_BASE = 0x$(shell $(NM) efi/relocs-dummy.o | sed -n 's, A ALT_START$$,,p')
 # Don't use $(wildcard ...) here - at least make 3.80 expands this too early!
 $(TARGET).efi: guard = $(if $(shell echo efi/dis* | grep disabled),:)
-$(TARGET).efi: prelink-efi.o efi.lds efi/relocs-dummy.o $(BASEDIR)/common/symbols-dummy.o efi/mkreloc
+$(TARGET).efi: prelink-efi.o efi.lds efi/relocs-dummy.o $(BASEDIR)/common/symbols-dummy.o efi/mkreloc build_id.o
 	$(foreach base, $(VIRT_BASE) $(ALT_BASE), \
 	          $(guard) $(LD) $(call EFI_LDFLAGS,$(base)) -T efi.lds -N $< efi/relocs-dummy.o \
 	                $(BASEDIR)/common/symbols-dummy.o -o $(@D)/.$(@F).$(base).0 &&) :
@@ -146,8 +150,8 @@ $(TARGET).efi: prelink-efi.o efi.lds efi/relocs-dummy.o $(BASEDIR)/common/symbol
 	$(guard) $(NM) -pa --format=sysv $(@D)/.$(@F).$(VIRT_BASE).1 \
 		| $(guard) $(BASEDIR)/tools/symbols --sysv --sort >$(@D)/.$(@F).1s.S
 	$(guard) $(MAKE) -f $(BASEDIR)/Rules.mk $(@D)/.$(@F).1r.o $(@D)/.$(@F).1s.o
-	$(guard) $(LD) $(call EFI_LDFLAGS,$(VIRT_BASE)) -T efi.lds -N $< \
-	                $(@D)/.$(@F).1r.o $(@D)/.$(@F).1s.o -o $@
+	$(guard) $(LD) $(call EFI_LDFLAGS,$(VIRT_BASE)) -T efi.lds --build-id=sha1 -N $< \
+	                $(@D)/.$(@F).1r.o $(@D)/.$(@F).1s.o build_id.o -o $@
 	if $(guard) false; then rm -f $@; echo 'EFI support disabled'; fi
 	rm -f $(@D)/.$(@F).[0-9]*
 
