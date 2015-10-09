@@ -93,6 +93,8 @@ class xen2
     pmu_ctrl
 # PMU use (domains, including unprivileged ones, will be using this operation)
     pmu_use
+# XENVER_build_id and other priv
+    version_priv
 }
 
 # Classes domain and domain2 consist of operations that a domain performs on

@@ -1633,6 +1633,8 @@ int xc_sysctl(xc_interface *xch, struct xen_sysctl *sysctl);
 
 int xc_version(xc_interface *xch, int cmd, void *arg);
 
+int xc_version_len(xc_interface *xch, int cmd, void *arg, size_t len);
+
 int xc_flask_op(xc_interface *xch, xen_flask_op_t *op);
 
 /*

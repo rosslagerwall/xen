@@ -67,6 +67,12 @@ SECTIONS
        *(.rodata.*)
   } :text
 
+  .note.gnu.build-id : {
+      __note_gnu_build_id_start = .;
+      *(.note.gnu.build-id)
+      __note_gnu_build_id_end = .;
+  } :text
+
   . = ALIGN(SMP_CACHE_BYTES);
   .data.read_mostly : {
        /* Exception table */

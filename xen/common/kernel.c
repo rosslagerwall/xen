@@ -229,7 +229,8 @@ void __init do_initcalls(void)
  */
 #define XENVER_CMD_XSM_CHECK    ( (1U << XENVER_compile_info) | \
                                   (1U << XENVER_changeset) | \
-                                  (1U << XENVER_commandline) )
+                                  (1U << XENVER_commandline) | \
+                                  (1U << XENVER_build_id) )
 DO(xen_version)(int cmd, XEN_GUEST_HANDLE_PARAM(void) arg,
                 unsigned int len)
 {
@@ -367,6 +368,35 @@ DO(xen_version)(int cmd, XEN_GUEST_HANDLE_PARAM(void) arg,
         if ( copy_to_guest(arg, saved_cmdline, ARRAY_SIZE(saved_cmdline)) )
             return -EFAULT;
         return 0;
+
+    case XENVER_build_id:
+    {
+        int rc;
+        char *p = NULL;
+        unsigned int sz = 0;
+
+        if ( guest_handle_is_null(arg) )
+            return -EINVAL;
+
+        if ( len == 0 )
+            return -EINVAL;
+
+        if ( !guest_handle_okay(arg, len) )
+            return -EINVAL;
+
+        rc = xen_build_id(&p, &sz);
+        if ( rc )
+            return rc;
+
+        if ( sz > len )
+            return -ENOMEM;
+
+        if ( copy_to_guest(arg, p, sz) )
+            return -EFAULT;
+
+        return sz;
+    }
+
     }
 
     return -ENOSYS;

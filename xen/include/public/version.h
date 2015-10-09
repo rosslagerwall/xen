@@ -30,7 +30,8 @@
 
 #include "xen.h"
 
-/* NB. All ops return zero on success, except XENVER_{version,pagesize} */
+/* NB. All ops return zero on success, except
+ * XENVER_{version,pagesize, build_id} */
 
 /* arg == NULL; returns major:minor (16:16). */
 #define XENVER_version      0
@@ -82,6 +83,12 @@ typedef struct xen_feature_info xen_feature_info_t;
 
 #define XENVER_commandline 9
 typedef char xen_commandline_t[1024];
+
+#define XENVER_build_id 10
+/*
+ * arg1 == pointer to char array, arg2 == size of char array.
+ * Return value is the actual size.
+ */
 
 #endif /* __XEN_PUBLIC_VERSION_H__ */
 

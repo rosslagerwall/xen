@@ -68,6 +68,7 @@ allow dom0_t xen_t:xen2 {
     resource_op
     psr_cmt_op
     psr_cat_op
+    version_priv
 };
 allow dom0_t xen_t:xen2 {
     pmu_ctrl
