@@ -36,6 +36,7 @@
 #include <xen/cpu.h>
 #include <xen/wait.h>
 #include <xen/guest_access.h>
+#include <xen/xsplice.h>
 #include <public/sysctl.h>
 #include <asm/regs.h>
 #include <asm/mc146818rtc.h>
@@ -120,6 +121,7 @@ static void idle_loop(void)
         (*pm_idle)();
         do_tasklet();
         do_softirq();
+        do_xsplice();
     }
 }
 
@@ -136,6 +138,7 @@ void startup_cpu_idle_loop(void)
 
 static void noreturn continue_idle_domain(struct vcpu *v)
 {
+    do_xsplice();
     reset_stack_and_jump(idle_loop);
 }
 
@@ -143,6 +146,7 @@ static void noreturn continue_nonidle_domain(struct vcpu *v)
 {
     check_wakeup_from_wait();
     mark_regs_dirty(guest_cpu_user_regs());
+    do_xsplice();
     reset_stack_and_jump(ret_from_intr);
 }
 

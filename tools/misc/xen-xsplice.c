@@ -24,6 +24,7 @@ void show_help(void)
             "  revert <id>          revert id <id> patch.\n"
             "  unload <id>          unload id <id> patch.\n"
             "  check <id>           check id <id> patch.\n"
+            "  replace <id>         apply <id> patch and revert all others.\n"
             "  trace [clear]        get the trace from hypervisor.\n",
             XEN_XSPLICE_ID_SIZE);
 }
@@ -243,6 +244,11 @@ struct {
         .expected = XSPLICE_STATUS_CHECKED,
         .name = "check",
         .function = xc_xsplice_check
+    },
+    {   .allow = XSPLICE_STATUS_CHECKED | XSPLICE_STATUS_REVERTED,
+        .expected = XSPLICE_STATUS_APPLIED,
+        .name = "replace",
+        .function = xc_xsplice_replace,
     },
 };
 

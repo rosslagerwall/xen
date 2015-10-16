@@ -276,6 +276,11 @@ extern struct exception_table_entry __start___pre_ex_table[];
 extern struct exception_table_entry __stop___pre_ex_table[];
 
 extern unsigned long search_exception_table(unsigned long);
+extern unsigned long search_one_table(const struct exception_table_entry *first,
+                                      const struct exception_table_entry *last,
+                                      unsigned long value);
 extern void sort_exception_tables(void);
+extern void sort_exception_table(struct exception_table_entry *start,
+                                 struct exception_table_entry *stop);
 
 #endif /* __X86_UACCESS_H__ */

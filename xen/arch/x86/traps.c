@@ -48,6 +48,7 @@
 #include <xen/kexec.h>
 #include <xen/trace.h>
 #include <xen/paging.h>
+#include <xen/xsplice.h>
 #include <xen/watchdog.h>
 #include <asm/system.h>
 #include <asm/io.h>
@@ -1075,7 +1076,8 @@ void do_invalid_op(struct cpu_user_regs *regs)
         return;
     }
 
-    if ( !is_active_kernel_text(regs->eip) ||
+    if ( !(is_active_kernel_text(regs->eip) ||
+           is_active_module_text(regs->eip)) ||
          __copy_from_user(bug_insn, eip, sizeof(bug_insn)) ||
          memcmp(bug_insn, "\xf\xb", sizeof(bug_insn)) )
         goto die;
@@ -1088,7 +1090,11 @@ void do_invalid_op(struct cpu_user_regs *regs)
             break;
     }
     if ( !stop_frames[id] )
-        goto die;
+    {
+        bug = xsplice_handle_bug(eip, &id);
+        if ( !bug )
+            goto die;
+    }
 
     eip += sizeof(bug_insn);
     if ( id == BUGFRAME_run_fn )
@@ -1102,7 +1108,7 @@ void do_invalid_op(struct cpu_user_regs *regs)
 
     /* WARN, BUG or ASSERT: decode the filename pointer and line number. */
     filename = bug_ptr(bug);
-    if ( !is_kernel(filename) )
+    if ( !is_kernel(filename) && !is_module(filename) )
         goto die;
     fixup = strlen(filename);
     if ( fixup > 50 )
@@ -1129,7 +1135,7 @@ void do_invalid_op(struct cpu_user_regs *regs)
     case BUGFRAME_assert:
         /* ASSERT: decode the predicate string pointer. */
         predicate = bug_msg(bug);
-        if ( !is_kernel(predicate) )
+        if ( !is_kernel(predicate) && !is_module(predicate) )
             predicate = "<unknown>";
 
         printk("Assertion '%s' failed at %s%s:%d\n",

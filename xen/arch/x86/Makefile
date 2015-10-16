@@ -7,7 +7,7 @@ subdir-y += oprofile
 
 subdir-$(x86_64) += x86_64
 
-obj-bin-y += alternative.init.o
+obj-bin-y += alternative.o
 obj-y += apic.o
 obj-y += bitops.o
 obj-bin-y += bzimage.init.o
@@ -61,6 +61,7 @@ obj-y += x86_emulate.o
 obj-y += tboot.o
 obj-y += hpet.o
 obj-y += vm_event.o
+obj-y += xsplice.o
 obj-y += xstate.o
 
 obj-$(crash_debug) += gdbstub.o
@@ -114,8 +115,10 @@ $(TARGET)-syms: prelink.o xen.lds $(BASEDIR)/common/symbols-dummy.o
 	$(MAKE) -f $(BASEDIR)/Rules.mk $(@D)/.$(@F).1.o
 	$(LD) $(LDFLAGS) -T xen.lds -N prelink.o --build-id=sha1 \
 	    $(@D)/.$(@F).1.o -o $@
-	$(OBJCOPY) --only-section=.note.gnu.build-id $@ build_id.o
 	rm -f $(@D)/.$(@F).[0-9]*
+
+build_id.o: $(TARGET)-syms
+	$(OBJCOPY) --only-section=.note.gnu.build-id $< build_id.o
 
 EFI_LDFLAGS = $(patsubst -m%,-mi386pep,$(LDFLAGS)) --subsystem=10
 EFI_LDFLAGS += --image-base=$(1) --stack=0,0 --heap=0,0 --strip-debug

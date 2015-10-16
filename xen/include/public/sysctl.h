@@ -898,6 +898,7 @@ struct xen_sysctl_xsplice_action {
 #define XSPLICE_ACTION_UNLOAD       2
 #define XSPLICE_ACTION_REVERT       3
 #define XSPLICE_ACTION_APPLY        4
+#define XSPLICE_ACTION_REPLACE      5
     uint32_t    cmd;                        /* IN: XSPLICE_ACTION_*. */
     uint32_t    _pad;                       /* IN: Always zero. */
     uint64_aligned_t time;                  /* IN: Zero if no timeout. */

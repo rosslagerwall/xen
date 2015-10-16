@@ -99,6 +99,9 @@ unsigned long __read_mostly xen_phys_start;
 
 unsigned long __read_mostly xen_virt_end;
 
+unsigned long __read_mostly module_virt_start;
+unsigned long __read_mostly module_virt_end;
+
 DEFINE_PER_CPU(struct tss_struct, init_tss);
 
 char __section(".bss.stack_aligned") cpu0_stack[STACK_SIZE];
@@ -1145,6 +1148,10 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     xen_virt_end = ((unsigned long)_end + (1UL << L2_PAGETABLE_SHIFT) - 1) &
                    ~((1UL << L2_PAGETABLE_SHIFT) - 1);
     destroy_xen_mappings(xen_virt_end, XEN_VIRT_START + BOOTSTRAP_MAP_BASE);
+
+    module_virt_start = xen_virt_end;
+    module_virt_end = XEN_VIRT_END - NR_CPUS * PAGE_SIZE;
+    BUG_ON(module_virt_end <= module_virt_start);
 
     memguard_init();
 

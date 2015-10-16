@@ -995,6 +995,11 @@ int xc_xsplice_check(xc_interface *xch, char *id)
     return _xc_xsplice_action(xch, id, XSPLICE_ACTION_CHECK);
 }
 
+int xc_xsplice_replace(xc_interface *xch, char *id)
+{
+    return _xc_xsplice_action(xch, id, XSPLICE_ACTION_REPLACE);
+}
+
 int xc_xsplice_trace(xc_interface *xch, unsigned int idx, char *info,
                      unsigned int max)
 {
