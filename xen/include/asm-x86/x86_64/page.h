@@ -38,6 +38,8 @@
 #include <xen/pdx.h>
 
 extern unsigned long xen_virt_end;
+extern unsigned long module_virt_start;
+extern unsigned long module_virt_end;
 
 #define spage_to_pdx(spg) (((spg) - spage_table)<<(SUPERPAGE_SHIFT-PAGE_SHIFT))
 #define pdx_to_spage(pdx) (spage_table + ((pdx)>>(SUPERPAGE_SHIFT-PAGE_SHIFT)))
