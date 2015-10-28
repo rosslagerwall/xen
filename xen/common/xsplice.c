@@ -45,6 +45,10 @@ struct payload {
 
     struct bug_frame *start_bug_frames[4];
     struct bug_frame *stop_bug_frames[4];
+#ifdef CONFIG_X86
+    struct exception_table_entry *start_ex_table;
+    struct exception_table_entry *stop_ex_table;
+#endif
 
     char  id[XEN_XSPLICE_NAME_SIZE + 1];          /* Name of it. */
 };
@@ -691,6 +695,17 @@ static int find_special_sections(struct payload *payload,
         payload->stop_bug_frames[i] = (struct bug_frame *)(sec->load_addr + sec->sec->sh_size);
     }
 
+#ifdef CONFIG_X86
+    sec = xsplice_elf_sec_by_name(elf, ".ex_table");
+    if ( sec )
+    {
+        payload->start_ex_table = (struct exception_table_entry *)sec->load_addr;
+        payload->stop_ex_table = (struct exception_table_entry *)(sec->load_addr + sec->sec->sh_size);
+
+        sort_exception_table(payload->start_ex_table, payload->stop_ex_table);
+    }
+#endif
+
     return 0;
 }
 
@@ -998,6 +1013,32 @@ bool_t is_active_module_text(unsigned long addr)
 
     return false;
 }
+
+#ifdef CONFIG_X86
+unsigned long search_module_extables(unsigned long addr)
+{
+    struct payload *data;
+    unsigned long ret;
+
+    /* No locking since this list is only ever changed during apply or revert
+     * context. */
+    list_for_each_entry ( data, &applied_list, applied_list )
+    {
+        if ( !data->start_ex_table )
+            continue;
+        if ( !((void *)addr >= data->module_address &&
+               (void *)addr < (data->module_address + data->core_text_size)))
+            continue;
+
+        ret = search_one_extable(data->start_ex_table, data->stop_ex_table - 1,
+                                 addr);
+        if ( ret )
+            return ret;
+    }
+
+    return 0;
+}
+#endif
 
 static int __init xsplice_init(void)
 {

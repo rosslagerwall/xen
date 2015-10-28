@@ -26,6 +26,8 @@ struct bug_frame * xsplice_find_bug(const char *eip, int *id);
 bool_t is_module(const void *addr);
 bool_t is_active_module_text(unsigned long addr);
 
+unsigned long search_module_extables(unsigned long addr);
+
 /* Arch hooks */
 int xsplice_verify_elf(uint8_t *data, ssize_t len);
 int xsplice_perform_rel(struct xsplice_elf *elf,
