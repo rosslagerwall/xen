@@ -19,6 +19,7 @@
 #include <xen/xsplice_elf.h>
 #include <xen/xsplice.h>
 #include <xen/version.h>
+#include <xen/xsplice_patch.h>
 #include <public/sysctl.h>
 
 #include <asm/event.h>
@@ -40,7 +41,12 @@ struct payload {
     struct list_head   applied_list;   /* Linked to 'applied_list'. */
 
     struct xsplice_patch_func *funcs;
+    xsplice_loadcall_t *load_funcs;
+    xsplice_unloadcall_t *unload_funcs;
     int nfuncs;
+    int n_load_funcs;
+    int n_unload_funcs;
+
     void *module_address;
     size_t module_pages;
     size_t core_size;
@@ -786,6 +792,20 @@ static int find_special_sections(struct payload *payload,
         }
     }
 
+    sec = xsplice_elf_sec_by_name(elf, ".xsplice.hooks.load");
+    if ( sec )
+    {
+        payload->load_funcs = (xsplice_loadcall_t *)sec->load_addr;
+        payload->n_load_funcs = sec->sec->sh_size / (sizeof *payload->load_funcs);
+    }
+
+    sec = xsplice_elf_sec_by_name(elf, ".xsplice.hooks.unload");
+    if ( sec )
+    {
+        payload->unload_funcs = (xsplice_unloadcall_t *)sec->load_addr;
+        payload->n_unload_funcs = sec->sec->sh_size / (sizeof *payload->unload_funcs);
+    }
+
 #ifdef CONFIG_X86
     sec = xsplice_elf_sec_by_name(elf, ".altinstructions");
     if ( sec )
@@ -1070,6 +1090,11 @@ static int apply_payload(struct payload *data)
     for ( i = 0; i < data->nfuncs; i++ )
         xsplice_apply_jmp(data->funcs + i);
 
+    spin_debug_disable();
+    for (i = 0; i < data->n_load_funcs; i++)
+        data->load_funcs[i]();
+    spin_debug_enable();
+
     list_add_tail(&data->applied_list, &applied_list);
 
     return 0;
@@ -1098,6 +1123,11 @@ static int revert_payload(struct payload *data)
 
     for ( i = 0; i < data->nfuncs; i++ )
         xsplice_revert_jmp(data->funcs + i);
+
+    spin_debug_disable();
+    for (i = 0; i < data->n_unload_funcs; i++)
+        data->unload_funcs[i]();
+    spin_debug_enable();
 
     list_del(&data->applied_list);
 

@@ -5,6 +5,52 @@
  * The following definitions are to be used in patches. They are taken
  * from kpatch.
  */
+typedef void (*xsplice_loadcall_t)(void);
+typedef void (*xsplice_unloadcall_t)(void);
+
+/* This definition is taken from Linux. */
+#define __UNIQUE_ID(prefix) __PASTE(__PASTE(__UNIQUE_ID_, prefix), __COUNTER__)
+/*
+ * XSPLICE_IGNORE_SECTION macro
+ *
+ * This macro is for ignoring sections that may change as a side effect of
+ * another change or might be a non-bundlable section; that is one that does
+ * not honor -ffunction-section and create a one-to-one relation from function
+ * symbol to section.
+ */
+#define XSPLICE_IGNORE_SECTION(_sec) \
+	char *__UNIQUE_ID(xsplice_ignore_section_) __section(".xsplice.ignore.sections") = _sec;
+
+/*
+ * XSPLICE_IGNORE_FUNCTION macro
+ *
+ * This macro is for ignoring functions that may change as a side effect of a
+ * change in another function.
+ */
+#define XSPLICE_IGNORE_FUNCTION(_fn) \
+	void *__xsplice_ignore_func_##_fn __section(".xsplice.ignore.functions") = _fn;
+
+/*
+ * XSPLICE_LOAD_HOOK macro
+ *
+ * Declares a function pointer to be allocated in a new
+ * .xsplice.hook.load section.  This xsplice_load_data symbol is later
+ * stripped by create-diff-object so that it can be declared in multiple
+ * objects that are later linked together, avoiding global symbol
+ * collision.  Since multiple hooks can be registered, the
+ * .xsplice.hook.load section is a table of functions that will be
+ * executed in series by the xsplice infrastructure at patch load time.
+ */
+#define XSPLICE_LOAD_HOOK(_fn) \
+	xsplice_loadcall_t __attribute__((weak)) xsplice_load_data __section(".xsplice.hooks.load") = _fn;
+
+/*
+ * XSPLICE_UNLOAD_HOOK macro
+ *
+ * Same as LOAD hook with s/load/unload/
+ */
+#define XSPLICE_UNLOAD_HOOK(_fn) \
+	xsplice_unloadcall_t __attribute__((weak)) xsplice_unload_data __section(".xsplice.hooks.unload") = _fn;
 
 /*
  * xsplice shadow variables
