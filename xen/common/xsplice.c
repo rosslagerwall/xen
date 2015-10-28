@@ -682,6 +682,17 @@ static int find_special_sections(struct payload *payload,
     payload->funcs = (struct xsplice_patch_func *)sec->load_addr;
     payload->nfuncs = sec->sec->sh_size / (sizeof *payload->funcs);
 
+#ifdef CONFIG_X86
+    sec = xsplice_elf_sec_by_name(elf, ".altinstructions");
+    if ( sec )
+    {
+        local_irq_disable();
+        apply_alternatives((struct alt_instr *)sec->load_addr,
+                           (struct alt_instr *)(sec->load_addr + sec->sec->sh_size));
+        local_irq_enable();
+    }
+#endif
+
     for ( i = 0; i < 4; i++ )
     {
         char str[14];

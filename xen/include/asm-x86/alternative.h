@@ -23,6 +23,7 @@ struct alt_instr {
     u8  replacementlen;     /* length of new instruction, <= instrlen */
 };
 
+extern void apply_alternatives(struct alt_instr *start, struct alt_instr *end);
 extern void alternative_instructions(void);
 
 #define OLDINSTR(oldinstr)      "661:\n\t" oldinstr "\n662:\n"

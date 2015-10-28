@@ -28,7 +28,7 @@
 extern struct alt_instr __alt_instructions[], __alt_instructions_end[];
 
 #ifdef K8_NOP1
-static const unsigned char k8nops[] __initconst = {
+static const unsigned char k8nops[] = {
     K8_NOP1,
     K8_NOP2,
     K8_NOP3,
@@ -52,7 +52,7 @@ static const unsigned char * const k8_nops[ASM_NOP_MAX+1] = {
 #endif
 
 #ifdef P6_NOP1
-static const unsigned char p6nops[] __initconst = {
+static const unsigned char p6nops[] = {
     P6_NOP1,
     P6_NOP2,
     P6_NOP3,
@@ -75,7 +75,7 @@ static const unsigned char * const p6_nops[ASM_NOP_MAX+1] = {
 };
 #endif
 
-static const unsigned char * const *ideal_nops __initdata = k8_nops;
+static const unsigned char * const *ideal_nops = k8_nops;
 
 static int __init mask_nmi_callback(const struct cpu_user_regs *regs, int cpu)
 {
@@ -100,7 +100,7 @@ static void __init arch_init_ideal_nops(void)
 }
 
 /* Use this to add nops to a buffer, then text_poke the whole buffer. */
-static void __init add_nops(void *insns, unsigned int len)
+static void add_nops(void *insns, unsigned int len)
 {
     while ( len > 0 )
     {
@@ -127,7 +127,7 @@ static void __init add_nops(void *insns, unsigned int len)
  *
  * This routine is called with local interrupt disabled.
  */
-static void *__init text_poke_early(void *addr, const void *opcode, size_t len)
+static void *text_poke_early(void *addr, const void *opcode, size_t len)
 {
     memcpy(addr, opcode, len);
     sync_core();
@@ -142,7 +142,7 @@ static void *__init text_poke_early(void *addr, const void *opcode, size_t len)
  * APs have less capabilities than the boot processor are not handled.
  * Tough. Make sure you disable such features by hand.
  */
-static void __init apply_alternatives(struct alt_instr *start, struct alt_instr *end)
+void apply_alternatives(struct alt_instr *start, struct alt_instr *end)
 {
     struct alt_instr *a;
     u8 *instr, *replacement;
