@@ -99,6 +99,7 @@ extern enum system_state {
 } system_state;
 
 bool_t is_active_kernel_text(unsigned long addr);
+bool_t is_active_text(unsigned long addr);
 
 #endif /* _LINUX_KERNEL_H */
 

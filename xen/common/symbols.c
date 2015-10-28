@@ -17,6 +17,7 @@
 #include <xen/lib.h>
 #include <xen/string.h>
 #include <xen/spinlock.h>
+#include <xen/xsplice.h>
 #include <public/platform.h>
 #include <xen/guest_access.h>
 
@@ -99,6 +100,12 @@ bool_t is_active_kernel_text(unsigned long addr)
 {
     return (is_kernel_text(addr) ||
             (system_state < SYS_STATE_active && is_kernel_inittext(addr)));
+}
+
+bool_t is_active_text(unsigned long addr)
+{
+    return is_active_kernel_text(addr) ||
+           is_active_module_text(addr);
 }
 
 const char *symbols_lookup(unsigned long addr,

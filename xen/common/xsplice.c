@@ -40,6 +40,11 @@ struct payload {
     int nfuncs;
     void *module_address;
     size_t module_pages;
+    size_t core_size;
+    size_t core_text_size;
+
+    struct bug_frame *start_bug_frames[4];
+    struct bug_frame *stop_bug_frames[4];
 
     char  id[XEN_XSPLICE_NAME_SIZE + 1];          /* Name of it. */
 };
@@ -525,26 +530,27 @@ static void free_module(struct payload *payload)
     payload->module_pages = 0;
 }
 
-static void alloc_section(struct xsplice_elf_sec *sec, size_t *core_size)
+static void alloc_section(struct xsplice_elf_sec *sec, size_t *size)
 {
-    size_t align_size = ROUNDUP(*core_size, sec->sec->sh_addralign);
+    size_t align_size = ROUNDUP(*size, sec->sec->sh_addralign);
     sec->sec->sh_entsize = align_size;
-    *core_size = sec->sec->sh_size + align_size;
+    *size = sec->sec->sh_size + align_size;
 }
 
 static int move_module(struct payload *payload, struct xsplice_elf *elf)
 {
     uint8_t *buf;
     int i;
-    size_t core_size = 0;
+    size_t size = 0;
 
     /* Allocate text regions */
     for ( i = 0; i < elf->hdr->e_shnum; i++ )
     {
         if ( (elf->sec[i].sec->sh_flags & (SHF_ALLOC|SHF_EXECINSTR)) ==
              (SHF_ALLOC|SHF_EXECINSTR) )
-            alloc_section(&elf->sec[i], &core_size);
+            alloc_section(&elf->sec[i], &size);
     }
+    payload->core_text_size = size;
 
     /* Allocate rw data */
     for ( i = 0; i < elf->hdr->e_shnum; i++ )
@@ -552,7 +558,7 @@ static int move_module(struct payload *payload, struct xsplice_elf *elf)
         if ( (elf->sec[i].sec->sh_flags & SHF_ALLOC) &&
              !(elf->sec[i].sec->sh_flags & SHF_EXECINSTR) &&
              (elf->sec[i].sec->sh_flags & SHF_WRITE) )
-            alloc_section(&elf->sec[i], &core_size);
+            alloc_section(&elf->sec[i], &size);
     }
 
     /* Allocate ro data */
@@ -561,15 +567,16 @@ static int move_module(struct payload *payload, struct xsplice_elf *elf)
         if ( (elf->sec[i].sec->sh_flags & SHF_ALLOC) &&
              !(elf->sec[i].sec->sh_flags & SHF_EXECINSTR) &&
              !(elf->sec[i].sec->sh_flags & SHF_WRITE) )
-            alloc_section(&elf->sec[i], &core_size);
+            alloc_section(&elf->sec[i], &size);
     }
+    payload->core_size = size;
 
-    buf = alloc_module(core_size);
+    buf = alloc_module(size);
     if ( !buf ) {
         printk(XENLOG_ERR "Could not allocate memory for module\n");
         return -ENOMEM;
     }
-    memset(buf, 0, core_size);
+    memset(buf, 0, size);
 
     for ( i = 0; i < elf->hdr->e_shnum; i++ )
     {
@@ -584,7 +591,7 @@ static int move_module(struct payload *payload, struct xsplice_elf *elf)
     }
 
     payload->module_address = buf;
-    payload->module_pages = PFN_UP(core_size);
+    payload->module_pages = PFN_UP(size);
 
     return 0;
 }
@@ -659,6 +666,7 @@ static int find_special_sections(struct payload *payload,
                                  struct xsplice_elf *elf)
 {
     struct xsplice_elf_sec *sec;
+    int i;
 
     sec = xsplice_elf_sec_by_name(elf, ".xsplice.funcs");
     if ( !sec )
@@ -669,6 +677,19 @@ static int find_special_sections(struct payload *payload,
 
     payload->funcs = (struct xsplice_patch_func *)sec->load_addr;
     payload->nfuncs = sec->sec->sh_size / (sizeof *payload->funcs);
+
+    for ( i = 0; i < 4; i++ )
+    {
+        char str[14];
+
+        snprintf(str, sizeof str, ".bug_frames.%d", i);
+        sec = xsplice_elf_sec_by_name(elf, str);
+        if ( !sec )
+            continue;
+
+        payload->start_bug_frames[i] = (struct bug_frame *)sec->load_addr;
+        payload->stop_bug_frames[i] = (struct bug_frame *)(sec->load_addr + sec->sec->sh_size);
+    }
 
     return 0;
 }
@@ -910,6 +931,72 @@ void do_xsplice(void)
         }
         local_irq_enable();
     }
+}
+
+
+/*
+ * Functions for handling special sections.
+ */
+struct bug_frame *xsplice_find_bug(const char *eip, int *id)
+{
+    struct payload *data;
+    struct bug_frame *bug;
+    int i;
+
+    /* No locking since this list is only ever changed during apply or revert
+     * context. */
+    list_for_each_entry ( data, &applied_list, applied_list )
+    {
+        for (i = 0; i < 4; i++) {
+            if (!data->start_bug_frames[i])
+                continue;
+            if ( !((void *)eip >= data->module_address &&
+                   (void *)eip < (data->module_address + data->core_text_size)))
+                continue;
+
+            for ( bug = data->start_bug_frames[i]; bug != data->stop_bug_frames[i]; ++bug ) {
+                if ( bug_loc(bug) == eip )
+                {
+                    *id = i;
+                    return bug;
+                }
+            }
+        }
+    }
+
+    return NULL;
+}
+
+bool_t is_module(const void *ptr)
+{
+    struct payload *data;
+
+    /* No locking since this list is only ever changed during apply or revert
+     * context. */
+    list_for_each_entry ( data, &applied_list, applied_list )
+    {
+        if ( ptr >= data->module_address &&
+             ptr < (data->module_address + data->core_size))
+            return true;
+    }
+
+    return false;
+}
+
+bool_t is_active_module_text(unsigned long addr)
+{
+    struct payload *data;
+
+    /* No locking since this list is only ever changed during apply or revert
+     * context. */
+    list_for_each_entry ( data, &applied_list, applied_list )
+    {
+        if ( (void *)addr >= data->module_address &&
+             (void *)addr < (data->module_address + data->core_text_size))
+            return true;
+    }
+
+    return false;
 }
 
 static int __init xsplice_init(void)
