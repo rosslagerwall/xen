@@ -26,6 +26,7 @@
 #include <xen/hypercall.h>
 #include <xen/domain_page.h>
 #include <xen/xenoprof.h>
+#include <xen/xsplice.h>
 #include <asm/current.h>
 #include <asm/io.h>
 #include <asm/paging.h>
@@ -1071,6 +1072,7 @@ static void noreturn svm_do_resume(struct vcpu *v)
 
     hvm_do_resume(v);
 
+    do_xsplice();
     reset_stack_and_jump(svm_asm_do_resume);
 }
 
