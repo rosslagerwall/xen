@@ -25,6 +25,7 @@
 #include <xen/kernel.h>
 #include <xen/keyhandler.h>
 #include <xen/vm_event.h>
+#include <xen/xsplice.h>
 #include <asm/current.h>
 #include <asm/cpufeature.h>
 #include <asm/processor.h>
@@ -1678,6 +1679,7 @@ void vmx_do_resume(struct vcpu *v)
     }
 
     hvm_do_resume(v);
+    do_xsplice();
     reset_stack_and_jump(vmx_asm_do_vmentry);
 }
 

@@ -3,6 +3,25 @@
 #include <xen/xsplice_elf.h>
 #include <xen/xsplice.h>
 
+#define PATCH_INSN_SIZE 5
+
+void xsplice_apply_jmp(struct xsplice_patch_func *func)
+{
+    uint32_t val;
+    uint8_t *old_ptr;
+
+    old_ptr = (uint8_t *)func->old_addr;
+    memcpy(func->undo, old_ptr, PATCH_INSN_SIZE);
+    *old_ptr++ = 0xe9; /* Relative jump */
+    val = func->new_addr - func->old_addr - PATCH_INSN_SIZE;
+    memcpy(old_ptr, &val, sizeof val);
+}
+
+void xsplice_revert_jmp(struct xsplice_patch_func *func)
+{
+    memcpy((void *)func->old_addr, func->undo, PATCH_INSN_SIZE);
+}
+
 int xsplice_verify_elf(uint8_t *data, ssize_t len)
 {
 

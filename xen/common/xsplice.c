@@ -11,15 +11,20 @@
 #include <xen/guest_access.h>
 #include <xen/stdbool.h>
 #include <xen/sched.h>
+#include <xen/softirq.h>
 #include <xen/lib.h>
+#include <xen/wait.h>
 #include <xen/xsplice_elf.h>
 #include <xen/xsplice.h>
 #include <public/sysctl.h>
 
 #include <asm/event.h>
+#include <asm/nmi.h>
 
 static DEFINE_SPINLOCK(payload_list_lock);
 static LIST_HEAD(payload_list);
+
+static LIST_HEAD(applied_list);
 
 static unsigned int payload_cnt;
 static unsigned int payload_version = 1;
@@ -29,15 +34,34 @@ struct payload {
     int32_t rc;         /* 0 or -EXX. */
 
     struct list_head   list;   /* Linked to 'payload_list'. */
+    struct list_head   applied_list;   /* Linked to 'applied_list'. */
 
+    struct xsplice_patch_func *funcs;
+    int nfuncs;
     void *module_address;
     size_t module_pages;
 
     char  id[XEN_XSPLICE_NAME_SIZE + 1];          /* Name of it. */
 };
 
+/* Defines an outstanding patching action. */
+struct xsplice_work
+{
+    atomic_t semaphore;          /* Used for rendezvous */
+    atomic_t irq_semaphore;      /* Used to signal all IRQs disabled */
+    struct payload *data;        /* The payload on which to act */
+    volatile bool_t do_work;     /* Signals work to do */
+    volatile bool_t ready;       /* Signals all CPUs synchronized */
+    uint32_t cmd;                /* Action request. XSPLICE_ACTION_* */
+};
+
+static DEFINE_SPINLOCK(xsplice_work_lock);
+/* There can be only one outstanding patching action. */
+static struct xsplice_work xsplice_work;
+
 static int load_module(struct payload *payload, uint8_t *raw, ssize_t len);
 static void free_module(struct payload *payload);
+static int schedule_work(struct payload *data, uint32_t cmd);
 
 static const char *state2str(int32_t state)
 {
@@ -341,28 +365,22 @@ static int xsplice_action(xen_sysctl_xsplice_action_t *action)
     case XSPLICE_ACTION_REVERT:
         if ( data->state == XSPLICE_STATE_APPLIED )
         {
-            /* No implementation yet. */
-            data->state = XSPLICE_STATE_CHECKED;
-            data->rc = 0;
-            rc = 0;
+            data->rc = -EAGAIN;
+            rc = schedule_work(data, action->cmd);
         }
         break;
     case XSPLICE_ACTION_APPLY:
         if ( (data->state == XSPLICE_STATE_CHECKED) )
         {
-            /* No implementation yet. */
-            data->state = XSPLICE_STATE_APPLIED;
-            data->rc = 0;
-            rc = 0;
+            data->rc = -EAGAIN;
+            rc = schedule_work(data, action->cmd);
         }
         break;
     case XSPLICE_ACTION_REPLACE:
         if ( data->state == XSPLICE_STATE_CHECKED )
         {
-            /* No implementation yet. */
-            data->state = XSPLICE_STATE_CHECKED;
-            data->rc = 0;
-            rc = 0;
+            data->rc = -EAGAIN;
+            rc = schedule_work(data, action->cmd);
         }
         break;
     default:
@@ -637,6 +655,24 @@ static int perform_relocs(struct xsplice_elf *elf)
     return 0;
 }
 
+static int find_special_sections(struct payload *payload,
+                                 struct xsplice_elf *elf)
+{
+    struct xsplice_elf_sec *sec;
+
+    sec = xsplice_elf_sec_by_name(elf, ".xsplice.funcs");
+    if ( !sec )
+    {
+        printk(XENLOG_ERR ".xsplice.funcs is missing\n");
+        return -1;
+    }
+
+    payload->funcs = (struct xsplice_patch_func *)sec->load_addr;
+    payload->nfuncs = sec->sec->sh_size / (sizeof *payload->funcs);
+
+    return 0;
+}
+
 static int load_module(struct payload *payload, uint8_t *raw, ssize_t len)
 {
     struct xsplice_elf elf;
@@ -662,6 +698,10 @@ static int load_module(struct payload *payload, uint8_t *raw, ssize_t len)
     if ( rc )
         goto err_module;
 
+    rc = find_special_sections(payload, &elf);
+    if ( rc )
+        goto err_module;
+
     return 0;
 
  err_module:
@@ -670,6 +710,206 @@ static int load_module(struct payload *payload, uint8_t *raw, ssize_t len)
     xsplice_elf_free(&elf);
 
     return rc;
+}
+
+
+/*
+ * The following functions get the CPUs into an appropriate state and
+ * apply (or revert) each of the module's functions.
+ */
+
+/*
+ * This function is executed having all other CPUs with no stack and IRQs
+ * disabled.
+ */
+static int apply_payload(struct payload *data)
+{
+    int i;
+
+    printk(XENLOG_DEBUG "Applying payload: %s\n", data->id);
+
+    for ( i = 0; i < data->nfuncs; i++ )
+        xsplice_apply_jmp(data->funcs + i);
+
+    list_add_tail(&data->applied_list, &applied_list);
+
+    return 0;
+}
+
+/*
+ * This function is executed having all other CPUs with no stack and IRQs
+ * disabled.
+ */
+static int revert_payload(struct payload *data)
+{
+    int i;
+
+    printk(XENLOG_DEBUG "Reverting payload: %s\n", data->id);
+
+    for ( i = 0; i < data->nfuncs; i++ )
+        xsplice_revert_jmp(data->funcs + i);
+
+    list_del(&data->applied_list);
+
+    return 0;
+}
+
+/* Must be holding the payload_list lock */
+static int schedule_work(struct payload *data, uint32_t cmd)
+{
+    /* Fail if an operation is already scheduled */
+    if ( xsplice_work.do_work )
+        return -EAGAIN;
+
+    xsplice_work.cmd = cmd;
+    xsplice_work.data = data;
+    atomic_set(&xsplice_work.semaphore, 0);
+    atomic_set(&xsplice_work.irq_semaphore, 0);
+    xsplice_work.ready = false;
+    smp_mb();
+    xsplice_work.do_work = true;
+    smp_mb();
+
+    return 0;
+}
+
+static int mask_nmi_callback(const struct cpu_user_regs *regs, int cpu)
+{
+    return 1;
+}
+
+static void reschedule_fn(void *unused)
+{
+    smp_mb(); /* Synchronize with setting do_work */
+    raise_softirq(SCHEDULE_SOFTIRQ);
+}
+
+/*
+ * The main function which manages the work of quiescing the system and
+ * patching code.
+ */
+void do_xsplice(void)
+{
+    int id;
+    unsigned int total_cpus;
+    nmi_callback_t saved_nmi_callback;
+
+    /* Fast path: no work to do */
+    if ( likely(!xsplice_work.do_work) )
+        return;
+
+    ASSERT(local_irq_is_enabled());
+
+    spin_lock(&xsplice_work_lock);
+    id = atomic_read(&xsplice_work.semaphore);
+    atomic_inc(&xsplice_work.semaphore);
+    spin_unlock(&xsplice_work_lock);
+
+    total_cpus = num_online_cpus();
+
+    if ( id == 0 )
+    {
+        s_time_t timeout, start;
+
+        /* Trigger other CPUs to execute do_xsplice */
+        smp_call_function(reschedule_fn, NULL, 0);
+
+        /* Wait for other CPUs with a timeout */
+        start = NOW();
+        timeout = start + MILLISECS(30);
+        while ( atomic_read(&xsplice_work.semaphore) != total_cpus &&
+                NOW() < timeout )
+            cpu_relax();
+
+        if ( atomic_read(&xsplice_work.semaphore) == total_cpus )
+        {
+            struct payload *data2;
+
+            /* "Mask" NMIs */
+            saved_nmi_callback = set_nmi_callback(mask_nmi_callback);
+
+            /* All CPUs are waiting, now signal to disable IRQs */
+            xsplice_work.ready = true;
+            smp_mb();
+
+            /* Wait for irqs to be disabled */
+            while ( atomic_read(&xsplice_work.irq_semaphore) != (total_cpus - 1) )
+                cpu_relax();
+
+            local_irq_disable();
+            /* Now this function should be the only one on any stack.
+             * No need to lock the payload list or applied list. */
+            switch ( xsplice_work.cmd )
+            {
+                case XSPLICE_ACTION_APPLY:
+                        xsplice_work.data->rc = apply_payload(xsplice_work.data);
+                        if ( xsplice_work.data->rc == 0 )
+                            xsplice_work.data->state = XSPLICE_STATE_APPLIED;
+                        break;
+                case XSPLICE_ACTION_REVERT:
+                        xsplice_work.data->rc = revert_payload(xsplice_work.data);
+                        if ( xsplice_work.data->rc == 0 )
+                            xsplice_work.data->state = XSPLICE_STATE_CHECKED;
+                        break;
+                case XSPLICE_ACTION_REPLACE:
+                        list_for_each_entry ( data2, &payload_list, list )
+                        {
+                            if ( data2->state != XSPLICE_STATE_APPLIED )
+                                continue;
+
+                            data2->rc = revert_payload(data2);
+                            if ( data2->rc == 0 )
+                                data2->state = XSPLICE_STATE_CHECKED;
+                            else
+                            {
+                                xsplice_work.data->rc = -EINVAL;
+                                break;
+                            }
+                        }
+                        if ( xsplice_work.data->rc != -EINVAL )
+                        {
+                            xsplice_work.data->rc = apply_payload(xsplice_work.data);
+                            if ( xsplice_work.data->rc == 0 )
+                                xsplice_work.data->state = XSPLICE_STATE_APPLIED;
+                        }
+                        break;
+                default:
+                        xsplice_work.data->rc = -EINVAL;
+                        break;
+            }
+
+            local_irq_enable();
+            set_nmi_callback(saved_nmi_callback);
+        }
+        else
+        {
+            xsplice_work.data->rc = -EBUSY;
+        }
+
+        xsplice_work.do_work = 0;
+        smp_mb(); /* Synchronize with waiting CPUs */
+    }
+    else
+    {
+        /* Wait for all CPUs to rendezvous */
+        while ( xsplice_work.do_work && !xsplice_work.ready )
+        {
+            cpu_relax();
+            smp_mb();
+        }
+
+        /* Disable IRQs and signal */
+        local_irq_disable();
+        atomic_inc(&xsplice_work.irq_semaphore);
+
+        /* Wait for patching to complete */
+        while ( xsplice_work.do_work )
+        {
+            cpu_relax();
+            smp_mb();
+        }
+        local_irq_enable();
+    }
 }
 
 static int __init xsplice_init(void)
