@@ -269,6 +269,10 @@ static int xsplice_get(xen_sysctl_xsplice_summary_t *summary)
 
     summary->status.state = data->state;
     summary->status.rc = data->rc;
+    if ( data->buildid )
+        memcpy(summary->status.buildid, data->buildid, BUILD_ID_LEN);
+    else
+        memset(summary->status.buildid, 0, BUILD_ID_LEN);
 
     return 0;
 }
@@ -313,6 +317,10 @@ static int xsplice_list(xen_sysctl_xsplice_list_t *list)
 
         status.state = data->state;
         status.rc = data->rc;
+        if ( data->buildid )
+            memcpy(status.buildid, data->buildid, BUILD_ID_LEN);
+        else
+            memset(status.buildid, 0, BUILD_ID_LEN);
         len = strlen(data->id);
 
         /* N.B. 'idx' != 'i'. */

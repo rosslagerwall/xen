@@ -820,12 +820,15 @@ DEFINE_XEN_GUEST_HANDLE(xen_sysctl_xsplice_upload_t);
  */
 #define XEN_SYSCTL_XSPLICE_GET 1
 
+#define BUILD_ID_LEN 20
+
 struct xen_xsplice_status {
 #define XSPLICE_STATE_LOADED       0x01
 #define XSPLICE_STATE_CHECKED      0x02
 #define XSPLICE_STATE_APPLIED      0x04
     int32_t state;                 /* OUT: XSPLICE_STATE_*. IN: MUST be zero. */
     int32_t rc;                    /* OUT: 0 if no error, otherwise -XEN_EXX. */
+    uint8_t buildid[BUILD_ID_LEN]; /* OUT: The build id, or zeros. */
                                    /* IN: MUST be zero. */
 };
 typedef struct xen_xsplice_status xen_xsplice_status_t;

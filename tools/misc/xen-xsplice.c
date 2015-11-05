@@ -86,8 +86,8 @@ static int list_func(int argc, char *argv[])
     if ( !len )
         goto out;
 
-    fprintf(stdout," ID                                     | status\n"
-                   "----------------------------------------+------------\n");
+    fprintf(stdout," ID                                     | Build ID                                  | status\n"
+                   "----------------------------------------+---------------------------------------------------\n");
     do {
         done = 0;
         memset(info, 'A', sizeof(*info) * MAX_LEN); /* Optional. */
@@ -104,13 +104,32 @@ static int list_func(int argc, char *argv[])
             unsigned int j;
             uint32_t sz;
             char *str;
+            bool has_buildid = false;
 
             sz = len[i];
             str = id + (i * XEN_XSPLICE_NAME_SIZE);
             for ( j = sz; j < XEN_XSPLICE_NAME_SIZE; j++ )
                 str[j] = '\0';
 
-            printf("%-40s| %s", str, state2str(info[i].state));
+            printf("%-40s| ", str);
+            for ( j = 0; j < BUILD_ID_LEN; j++ )
+            {
+                if ( info[i].buildid[j] )
+                {
+                    has_buildid = true;
+                    break;
+                }
+            }
+
+            for ( j = 0; j < BUILD_ID_LEN; j++ )
+            {
+                if ( has_buildid )
+                    printf("%02hhx", info[i].buildid[j]);
+                else
+                    printf("  ");
+            }
+            printf("| %s", state2str(info[i].state));
+
             if ( info[i].rc )
                 printf(" (%d, %s)\n", -info[i].rc, strerror(-info[i].rc));
             else

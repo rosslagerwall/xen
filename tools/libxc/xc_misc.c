@@ -787,6 +787,8 @@ int xc_xsplice_get(xc_interface *xch,
 
     sysctl.u.xsplice.u.get.status.state = 0;
     sysctl.u.xsplice.u.get.status.rc = 0;
+    memset(sysctl.u.xsplice.u.get.status.buildid, 0,
+           sizeof sysctl.u.xsplice.u.get.status.buildid);
 
     sysctl.u.xsplice.u.get.id.size = len;
     sysctl.u.xsplice.u.get.id.pad = 0;
