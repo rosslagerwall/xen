@@ -14,8 +14,10 @@
 #include <xen/softirq.h>
 #include <xen/lib.h>
 #include <xen/wait.h>
+#include <xen/elf.h>
 #include <xen/xsplice_elf.h>
 #include <xen/xsplice.h>
+#include <xen/version.h>
 #include <public/sysctl.h>
 
 #include <asm/event.h>
@@ -49,6 +51,9 @@ struct payload {
     struct exception_table_entry *start_ex_table;
     struct exception_table_entry *stop_ex_table;
 #endif
+
+    struct xsplice_depend *dep;
+    uint8_t *buildid;
 
     char  id[XEN_XSPLICE_NAME_SIZE + 1];          /* Name of it. */
 };
@@ -666,6 +671,8 @@ static int perform_relocs(struct xsplice_elf *elf)
     return 0;
 }
 
+#define NT_GNU_BUILD_ID 3
+
 static int find_special_sections(struct payload *payload,
                                  struct xsplice_elf *elf)
 {
@@ -717,6 +724,23 @@ static int find_special_sections(struct payload *payload,
     }
 #endif
 
+    sec = xsplice_elf_sec_by_name(elf, ".note.gnu.build-id");
+    if ( sec )
+    {
+        Elf_Note *n = (Elf_Note *)sec->load_addr;
+        if ( sec->sec->sh_size >= sizeof *n &&
+             n->type == NT_GNU_BUILD_ID &&
+             n->descsz == BUILD_ID_LEN )
+            payload->buildid = (uint8_t *)ELFNOTE_DESC(n);
+    }
+
+    sec = xsplice_elf_sec_by_name(elf, ".xsplice.depends");
+    if ( sec )
+    {
+        if (sec->sec->sh_size == (sizeof *payload->dep))
+            payload->dep = (struct xsplice_depend *)sec->load_addr;
+    }
+
     return 0;
 }
 
@@ -764,6 +788,35 @@ static int load_module(struct payload *payload, uint8_t *raw, ssize_t len)
  * The following functions get the CPUs into an appropriate state and
  * apply (or revert) each of the module's functions.
  */
+/* Only apply if the payload is applied on top of the correct build-id. */
+static int apply_depcheck(struct payload *payload)
+{
+    if ( !payload->dep )
+        return 0;
+
+    if ( list_empty(&applied_list) )
+    {
+        char *hv_buildid;
+        unsigned int len;
+
+        xen_build_id(&hv_buildid, &len);
+        ASSERT(BUILD_ID_LEN == len);
+
+        if ( !memcmp(hv_buildid, payload->dep->buildid, BUILD_ID_LEN) )
+            return 0;
+    }
+    else
+    {
+        struct payload *data = list_last_entry(&applied_list, struct payload,
+                                               applied_list);
+
+        if ( data->buildid &&
+             !memcmp(data->buildid, payload->dep->buildid, BUILD_ID_LEN) )
+            return 0;
+    }
+
+    return -EINVAL;
+}
 
 /*
  * This function is executed having all other CPUs with no stack and IRQs
@@ -771,7 +824,11 @@ static int load_module(struct payload *payload, uint8_t *raw, ssize_t len)
  */
 static int apply_payload(struct payload *data)
 {
-    int i;
+    int i, rc;
+
+    rc = apply_depcheck(data);
+    if ( rc )
+        return rc;
 
     printk(XENLOG_DEBUG "Applying payload: %s\n", data->id);
 
@@ -783,13 +840,24 @@ static int apply_payload(struct payload *data)
     return 0;
 }
 
+/* Only allow reverting if this is the top of the stack. */
+static int revert_depcheck(struct payload *payload)
+{
+    return (list_last_entry_or_null(&applied_list, struct payload,
+                                    applied_list) == payload) ? 0 : -EINVAL;
+}
+
 /*
  * This function is executed having all other CPUs with no stack and IRQs
  * disabled.
  */
 static int revert_payload(struct payload *data)
 {
-    int i;
+    int i, rc;
+
+    rc = revert_depcheck(data);
+    if ( rc )
+        return rc;
 
     printk(XENLOG_DEBUG "Reverting payload: %s\n", data->id);
 

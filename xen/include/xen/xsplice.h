@@ -15,6 +15,12 @@ struct xsplice_patch_func {
     uint8_t pad[56];
 };
 
+#define BUILD_ID_LEN 20
+
+struct xsplice_depend {
+    uint8_t buildid[BUILD_ID_LEN];
+};
+
 struct xen_sysctl_xsplice_op;
 int xsplice_control(struct xen_sysctl_xsplice_op *);
 
