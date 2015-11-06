@@ -600,8 +600,9 @@ static int move_module(struct payload *payload, struct xsplice_elf *elf)
         if ( elf->sec[i].sec->sh_flags & SHF_ALLOC )
         {
             elf->sec[i].load_addr = buf + elf->sec[i].sec->sh_entsize;
-            memcpy(elf->sec[i].load_addr, elf->sec[i].data,
-                   elf->sec[i].sec->sh_size);
+            if ( elf->sec[i].sec->sh_type != SHT_NOBITS )
+                memcpy(elf->sec[i].load_addr, elf->sec[i].data,
+                       elf->sec[i].sec->sh_size);
             printk(XENLOG_DEBUG "Loaded %s at 0x%p\n",
                    elf->sec[i].name, elf->sec[i].load_addr);
         }
