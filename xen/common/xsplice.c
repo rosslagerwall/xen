@@ -726,7 +726,7 @@ static int find_special_sections(struct payload *payload,
             payload->funcs[i].old_addr = symbols_lookup_by_name(payload->funcs[i].name);
             if ( !payload->funcs[i].old_addr )
             {
-                payload->funcs[i].old_addr = xsplice_symbols_lookup_by_name(payload->funcs[i].name, false);
+                payload->funcs[i].old_addr = xsplice_symbols_lookup_by_name(payload->funcs[i].name, true);
                 if ( !payload->funcs[i].old_addr )
                 {
                     printk(XENLOG_ERR "Could not resolve old address of %s\n",
