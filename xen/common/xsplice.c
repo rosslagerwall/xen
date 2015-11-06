@@ -1294,6 +1294,48 @@ out:
     return value;
 }
 
+const char *xsplice_symbols_lookup(unsigned long addr,
+                                   unsigned long *symbolsize,
+                                   unsigned long *offset,
+                                   const char **module)
+{
+    struct payload *data;
+    int i, best;
+
+    /* No locking since this list is only ever changed during apply or revert
+     * context. */
+    list_for_each_entry ( data, &applied_list, applied_list )
+    {
+        if ( !((void *)addr >= data->module_address &&
+               (void *)addr < (data->module_address + data->core_text_size)))
+            continue;
+
+        best = -1;
+
+        for ( i = 0; i < data->nsyms; i++ )
+        {
+            if ( data->symtab[i].value <= addr &&
+                 (best == -1 ||
+                  data->symtab[best].value < data->symtab[i].value) )
+                best = i;
+        }
+
+        if ( best == -1 )
+            return NULL;
+
+        if ( symbolsize )
+            *symbolsize = data->symtab[best].size;
+        if ( offset )
+            *offset = addr - data->symtab[best].value;
+        if ( module )
+            *module = data->id;
+
+        return data->symtab[best].name;
+    }
+
+    return NULL;
+}
+
 static int __init xsplice_init(void)
 {
     register_keyhandler('x', xsplice_printall, "print xsplicing info", 1);

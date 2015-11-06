@@ -20,6 +20,7 @@
 #include <xen/symbols.h>
 #include <xen/lib.h>
 #include <xen/sched.h>
+#include <xen/xsplice.h>
 #include <asm/div64.h>
 #include <asm/page.h>
 
@@ -305,15 +306,21 @@ static char *pointer(char *str, char *end, const char **fmt_ptr,
     {
         unsigned long sym_size, sym_offset;
         char namebuf[KSYM_NAME_LEN+1];
+        const char *module = NULL;
 
         /* Advance parents fmt string, as we have consumed 's' or 'S' */
         ++*fmt_ptr;
 
         s = symbols_lookup((unsigned long)arg, &sym_size, &sym_offset, namebuf);
 
-        /* If the symbol is not found, fall back to printing the address */
         if ( !s )
-            break;
+        {
+            s = xsplice_symbols_lookup((unsigned long)arg, &sym_size,
+                                       &sym_offset, &module);
+            /* If the symbol is not found, fall back to printing the address */
+            if ( !s )
+                break;
+        }
 
         /* Print symbol name */
         str = string(str, end, s, -1, -1, 0);
@@ -326,6 +333,13 @@ static char *pointer(char *str, char *end, const char **fmt_ptr,
                 *str = '/';
             ++str;
             str = number(str, end, sym_size, 16, -1, -1, SPECIAL);
+        }
+
+        if ( module )
+        {
+            str = string(str, end, " [", -1, -1, 0);
+            str = string(str, end, module, -1, -1, 0);
+            str = string(str, end, "]", -1, -1, 0);
         }
 
         return str;

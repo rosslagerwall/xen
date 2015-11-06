@@ -46,6 +46,10 @@ bool_t is_active_module_text(unsigned long addr);
 unsigned long search_module_extables(unsigned long addr);
 
 uint64_t xsplice_symbols_lookup_by_name(const char *symname, bool new);
+const char *xsplice_symbols_lookup(unsigned long addr,
+                                   unsigned long *symbolsize,
+                                   unsigned long *offset,
+                                   const char **module);
 
 /* Arch hooks */
 int xsplice_verify_elf(uint8_t *data, ssize_t len);

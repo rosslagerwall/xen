@@ -273,7 +273,7 @@ static void _show_trace(unsigned long sp, unsigned long __maybe_unused bp)
     while ( stack <= bottom )
     {
         addr = *stack++;
-        if ( is_active_kernel_text(addr) )
+        if ( is_active_text(addr) )
             printk("   [<%p>] %pS\n", _p(addr), _p(addr));
     }
 }
@@ -335,8 +335,8 @@ static void show_trace(const struct cpu_user_regs *regs)
      * If RIP looks sensible, or the top of the stack doesn't, print RIP at
      * the top of the stack trace.
      */
-    if ( is_active_kernel_text(regs->rip) ||
-         !is_active_kernel_text(*sp) )
+    if ( is_active_text(regs->rip) ||
+         !is_active_text(*sp) )
         printk("   [<%p>] %pS\n", _p(regs->rip), _p(regs->rip));
     /*
      * Else RIP looks bad but the top of the stack looks good.  Perhaps we
