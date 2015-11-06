@@ -107,12 +107,14 @@ static elf_errorstatus xc_dom_parse_hvm_kernel(struct xc_dom_image *dom)
         return rc;
     }
 
+#if 0
     if ( !elf_32bit(elf) )
     {
         xc_dom_panic(dom->xch, XC_INVALID_KERNEL, "%s: ELF image is not 32bit",
                      __func__);
         return -EINVAL;
     }
+#endif
 
     /* parse binary and get xen meta info */
     elf_parse_binary(elf);
