@@ -785,6 +785,23 @@ static int find_special_sections(struct payload *payload,
             payload->buildid = (uint8_t *)ELFNOTE_DESC(n);
     }
 
+    if ( payload->buildid )
+    {
+        struct payload *data;
+
+        spin_lock(&payload_list_lock);
+        list_for_each_entry ( data, &payload_list, list )
+        {
+            if ( data != payload && data->buildid &&
+                 !memcmp(data->buildid, payload->buildid, BUILD_ID_LEN) )
+            {
+                spin_unlock(&payload_list_lock);
+                return -EEXIST;
+            }
+        }
+        spin_unlock(&payload_list_lock);
+    }
+
     sec = xsplice_elf_sec_by_name(elf, ".xsplice.depends");
     if ( sec )
     {
