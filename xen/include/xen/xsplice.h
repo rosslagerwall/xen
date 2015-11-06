@@ -1,6 +1,8 @@
 #ifndef __XEN_XSPLICE_H__
 #define __XEN_XSPLICE_H__
 
+#include <xen/stdbool.h>
+
 struct xsplice_elf;
 struct xsplice_elf_sec;
 struct xsplice_elf_sym;
@@ -21,6 +23,15 @@ struct xsplice_depend {
     uint8_t buildid[BUILD_ID_LEN];
 };
 
+#define XSPLICE_SYMBOL_NEW    0x1
+
+struct xsplice_symbol {
+    char *name;
+    uint64_t value;
+    size_t size;
+    int flags;
+};
+
 struct xen_sysctl_xsplice_op;
 int xsplice_control(struct xen_sysctl_xsplice_op *);
 
@@ -33,6 +44,8 @@ bool_t is_module(const void *addr);
 bool_t is_active_module_text(unsigned long addr);
 
 unsigned long search_module_extables(unsigned long addr);
+
+uint64_t xsplice_symbols_lookup_by_name(const char *symname, bool new);
 
 /* Arch hooks */
 int xsplice_verify_elf(uint8_t *data, ssize_t len);

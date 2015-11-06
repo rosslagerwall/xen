@@ -12,6 +12,7 @@
 #include <xen/stdbool.h>
 #include <xen/sched.h>
 #include <xen/softirq.h>
+#include <xen/symbols.h>
 #include <xen/lib.h>
 #include <xen/wait.h>
 #include <xen/elf.h>
@@ -54,6 +55,10 @@ struct payload {
 
     struct xsplice_depend *dep;
     uint8_t *buildid;
+
+    struct xsplice_symbol *symtab;
+    char *strtab;
+    int nsyms;
 
     char  id[XEN_XSPLICE_NAME_SIZE + 1];          /* Name of it. */
 };
@@ -186,6 +191,8 @@ static void __free_payload(struct payload *data)
     payload_cnt --;
     payload_version ++;
     free_module(data);
+    xfree(data->symtab);
+    xfree(data->strtab);
     xfree(data);
 }
 
@@ -244,6 +251,8 @@ static int xsplice_upload(xen_sysctl_xsplice_upload_t *upload)
 err_raw:
     free_xenheap_pages(raw_data, get_order_from_bytes(upload->size));
 err_data:
+    xfree(data->symtab);
+    xfree(data->strtab);
     xfree(data);
     return rc;
 }
@@ -628,8 +637,19 @@ static int resolve_symbols(struct xsplice_elf *elf)
                 return -EINVAL;
                 break;
             case SHN_UNDEF:
-                printk(XENLOG_ERR "Unknown symbol: %s\n", elf->sym[i].name);
-                return -ENOENT;
+                elf->sym[i].sym->st_value = symbols_lookup_by_name(elf->sym[i].name);
+                if ( !elf->sym[i].sym->st_value )
+                {
+                    elf->sym[i].sym->st_value =
+                        xsplice_symbols_lookup_by_name(elf->sym[i].name, true);
+                    if ( !elf->sym[i].sym->st_value )
+                    {
+                        printk(XENLOG_ERR "Unknown symbol: %s\n", elf->sym[i].name);
+                        return -ENOENT;
+                    }
+                }
+                printk(XENLOG_DEBUG "Undefined symbol resolved: %s => 0x%p\n",
+                       elf->sym[i].name, (void *)elf->sym[i].sym->st_value);
                 break;
             case SHN_ABS:
                 printk(XENLOG_DEBUG "Absolute symbol: %s => 0x%p\n",
@@ -698,6 +718,28 @@ static int find_special_sections(struct payload *payload,
     payload->funcs = (struct xsplice_patch_func *)sec->load_addr;
     payload->nfuncs = sec->sec->sh_size / (sizeof *payload->funcs);
 
+    for ( i = 0; i < payload->nfuncs; i++ )
+    {
+        /* Lookup function's old address if not already resolved */
+        if ( !payload->funcs[i].old_addr )
+        {
+            payload->funcs[i].old_addr = symbols_lookup_by_name(payload->funcs[i].name);
+            if ( !payload->funcs[i].old_addr )
+            {
+                payload->funcs[i].old_addr = xsplice_symbols_lookup_by_name(payload->funcs[i].name, false);
+                if ( !payload->funcs[i].old_addr )
+                {
+                    printk(XENLOG_ERR "Could not resolve old address of %s\n",
+                           payload->funcs[i].name);
+                    return -ENOENT;
+                }
+            }
+            printk(XENLOG_DEBUG "Resolved old address %s => 0x%p\n",
+                   payload->funcs[i].name,
+                   (void *)payload->funcs[i].old_addr);
+        }
+    }
+
 #ifdef CONFIG_X86
     sec = xsplice_elf_sec_by_name(elf, ".altinstructions");
     if ( sec )
@@ -753,6 +795,98 @@ static int find_special_sections(struct payload *payload,
     return 0;
 }
 
+static bool is_core_symbol(struct xsplice_elf *elf, struct xsplice_elf_sym *sym)
+{
+    if ( sym->sym->st_shndx == SHN_UNDEF ||
+         sym->sym->st_shndx >= elf->hdr->e_shnum )
+        return false;
+
+    return !!((elf->sec[sym->sym->st_shndx].sec->sh_flags & SHF_ALLOC) &&
+              (ELF64_ST_TYPE(sym->sym->st_info) == STT_OBJECT ||
+               ELF64_ST_TYPE(sym->sym->st_info) == STT_FUNC));
+}
+
+static int build_symbol_table(struct payload *payload, struct xsplice_elf *elf)
+{
+    int i, j, nsyms = 0;
+    size_t strtab_len = 0;
+    struct xsplice_symbol *symtab;
+    char *strtab;
+
+    for ( i = 1; i < elf->nsym; i++ )
+    {
+        if ( is_core_symbol(elf, elf->sym + i) )
+        {
+            nsyms++;
+            strtab_len += strlen(elf->sym[i].name) + 1;
+        }
+    }
+
+    symtab = xmalloc_array(struct xsplice_symbol, nsyms);
+    if ( !symtab )
+        return -ENOMEM;
+
+    strtab = xmalloc_bytes(strtab_len);
+    if ( !strtab )
+    {
+        xfree(symtab);
+        return -ENOMEM;
+    }
+
+    nsyms = 0;
+    strtab_len = 0;
+    for ( i = 1; i < elf->nsym; i++ )
+    {
+        if ( is_core_symbol(elf, elf->sym + i) )
+        {
+            symtab[nsyms].name = strtab + strtab_len;
+            symtab[nsyms].size = elf->sym[i].sym->st_size;
+            symtab[nsyms].value = elf->sym[i].sym->st_value;
+            symtab[nsyms].flags = 0;
+            strtab_len += strlcpy(strtab + strtab_len, elf->sym[i].name,
+                                  KSYM_NAME_LEN) + 1;
+            nsyms++;
+        }
+    }
+
+    for ( i = 0; i < nsyms; i++ )
+    {
+        bool found = false;
+
+        for ( j = 0; j < payload->nfuncs; j++)
+        {
+            if ( symtab[i].value == payload->funcs[j].new_addr )
+            {
+                found = true;
+                break;
+            }
+        }
+
+        if ( !found )
+        {
+            if ( xsplice_symbols_lookup_by_name(symtab[i].name, true) )
+            {
+                printk(XENLOG_ERR "duplicate new symbol: %s\n", symtab[i].name);
+                xfree(symtab);
+                xfree(strtab);
+                return -EEXIST;
+            }
+            symtab[i].flags |= XSPLICE_SYMBOL_NEW;
+            printk(XENLOG_DEBUG "new symbol %s\n", symtab[i].name);
+        }
+        else
+        {
+            printk(XENLOG_DEBUG "overriding symbol %s\n", symtab[i].name);
+        }
+    }
+
+    payload->symtab = symtab;
+    payload->strtab = strtab;
+    payload->nsyms = nsyms;
+
+    return 0;
+}
+
 static int load_module(struct payload *payload, uint8_t *raw, ssize_t len)
 {
     struct xsplice_elf elf;
@@ -779,6 +913,10 @@ static int load_module(struct payload *payload, uint8_t *raw, ssize_t len)
         goto err_module;
 
     rc = find_special_sections(payload, &elf);
+    if ( rc )
+        goto err_module;
+
+    rc = build_symbol_table(payload, &elf);
     if ( rc )
         goto err_module;
 
@@ -1127,6 +1265,34 @@ unsigned long search_module_extables(unsigned long addr)
     return 0;
 }
 #endif
+
+uint64_t xsplice_symbols_lookup_by_name(const char *symname, bool new)
+{
+    struct payload *data;
+    int i;
+    uint64_t value = 0;
+
+    spin_lock(&payload_list_lock);
+
+    list_for_each_entry ( data, &payload_list, list )
+    {
+        for ( i = 0; i < data->nsyms; i++ )
+        {
+            if ( new && !(data->symtab[i].flags & XSPLICE_SYMBOL_NEW) )
+                continue;
+
+            if ( !strcmp(data->symtab[i].name, symname) )
+            {
+                value = data->symtab[i].value;
+                goto out;
+            }
+        }
+    }
+
+out:
+    spin_unlock(&payload_list_lock);
+    return value;
+}
 
 static int __init xsplice_init(void)
 {

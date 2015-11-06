@@ -209,3 +209,26 @@ int xensyms_read(uint32_t *symnum, char *type,
 
     return 0;
 }
+
+uint64_t symbols_lookup_by_name(const char *symname)
+{
+    uint32_t symnum = 0;
+    uint64_t addr = 0, outaddr = 0;
+    int rc;
+    char type;
+    char name[KSYM_NAME_LEN + 1] = {0};
+
+    do {
+        rc = xensyms_read(&symnum, &type, &addr, name);
+        if ( rc )
+            break;
+
+        if (!strcmp(name, symname))
+        {
+            outaddr = addr;
+            break;
+        }
+    } while (name[0] != '\0');
+
+    return outaddr;
+}
