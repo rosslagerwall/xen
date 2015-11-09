@@ -56,11 +56,20 @@ struct payload {
     struct xsplice_depend *dep;
     uint8_t *buildid;
 
+    struct list_head source_list;
+    struct list_head target_list;
+
     struct xsplice_symbol *symtab;
     char *strtab;
     int nsyms;
 
     char  id[XEN_XSPLICE_NAME_SIZE + 1];          /* Name of it. */
+};
+
+struct payload_use {
+    struct list_head source_list;
+    struct list_head target_list;
+    struct payload *source, *target;
 };
 
 /* Defines an outstanding patching action. */
@@ -81,6 +90,10 @@ static struct xsplice_work xsplice_work;
 static int load_module(struct payload *payload, uint8_t *raw, ssize_t len);
 static void free_module(struct payload *payload);
 static int schedule_work(struct payload *data, uint32_t cmd);
+static int xsplice_symbols_lookup_by_name(struct payload *payload,
+                                          const char *symname,
+                                          uint64_t *value,
+                                          bool new);
 
 static const char *state2str(int32_t state)
 {
@@ -187,9 +200,20 @@ static int verify_payload(xen_sysctl_xsplice_upload_t *upload)
  */
 static void __free_payload(struct payload *data)
 {
+    struct payload_use *use, *tmp;
+
     list_del(&data->list);
     payload_cnt --;
     payload_version ++;
+
+    list_for_each_entry_safe ( use, tmp, &data->target_list, target_list )
+    {
+        printk(XENLOG_DEBUG "releasing ref on %s\n", use->target->id);
+        list_del(&use->source_list);
+        list_del(&use->target_list);
+        xfree(use);
+    }
+
     free_module(data);
     xfree(data->symtab);
     xfree(data->strtab);
@@ -230,6 +254,9 @@ static int xsplice_upload(xen_sysctl_xsplice_upload_t *upload)
     rc = -EFAULT;
     if ( copy_from_guest(raw_data, upload->payload, upload->size) )
         goto err_raw;
+
+    INIT_LIST_HEAD(&data->source_list);
+    INIT_LIST_HEAD(&data->target_list);
 
     rc = load_module(data, raw_data, upload->size);
     if ( rc )
@@ -388,9 +415,17 @@ static int xsplice_action(xen_sysctl_xsplice_action_t *action)
         if ( (data->state == XSPLICE_STATE_LOADED) ||
              (data->state == XSPLICE_STATE_CHECKED) )
         {
-            __free_payload(data);
-            /* No touching 'data' from here on! */
-            rc = 0;
+            if ( list_empty(&data->source_list) )
+            {
+                __free_payload(data);
+                /* No touching 'data' from here on! */
+                rc = 0;
+            }
+            else
+            {
+                data->rc = -EBUSY;
+                rc = 0;
+            }
         }
         break;
     case XSPLICE_ACTION_REVERT:
@@ -623,7 +658,7 @@ static int move_module(struct payload *payload, struct xsplice_elf *elf)
     return 0;
 }
 
-static int resolve_symbols(struct xsplice_elf *elf)
+static int resolve_symbols(struct payload *payload, struct xsplice_elf *elf)
 {
     int i;
 
@@ -640,12 +675,17 @@ static int resolve_symbols(struct xsplice_elf *elf)
                 elf->sym[i].sym->st_value = symbols_lookup_by_name(elf->sym[i].name);
                 if ( !elf->sym[i].sym->st_value )
                 {
-                    elf->sym[i].sym->st_value =
-                        xsplice_symbols_lookup_by_name(elf->sym[i].name, true);
-                    if ( !elf->sym[i].sym->st_value )
+                    int rc;
+
+                    rc = xsplice_symbols_lookup_by_name(payload,
+                                                        elf->sym[i].name,
+                                                        &elf->sym[i].sym->st_value,
+                                                        true);
+                    if ( rc )
                     {
-                        printk(XENLOG_ERR "Unknown symbol: %s\n", elf->sym[i].name);
-                        return -ENOENT;
+                        if ( rc == -ENOENT )
+                            printk(XENLOG_ERR "Unknown symbol: %s\n", elf->sym[i].name);
+                        return rc;
                     }
                 }
                 printk(XENLOG_DEBUG "Undefined symbol resolved: %s => 0x%p\n",
@@ -726,12 +766,18 @@ static int find_special_sections(struct payload *payload,
             payload->funcs[i].old_addr = symbols_lookup_by_name(payload->funcs[i].name);
             if ( !payload->funcs[i].old_addr )
             {
-                payload->funcs[i].old_addr = xsplice_symbols_lookup_by_name(payload->funcs[i].name, true);
-                if ( !payload->funcs[i].old_addr )
+                int rc;
+
+                rc = xsplice_symbols_lookup_by_name(payload,
+                                                    payload->funcs[i].name,
+                                                    &payload->funcs[i].old_addr,
+                                                    true);
+                if ( rc )
                 {
-                    printk(XENLOG_ERR "Could not resolve old address of %s\n",
-                           payload->funcs[i].name);
-                    return -ENOENT;
+                    if ( rc == -ENOENT )
+                        printk(XENLOG_ERR "Could not resolve old address of %s\n",
+                               payload->funcs[i].name);
+                    return rc;
                 }
             }
             printk(XENLOG_DEBUG "Resolved old address %s => 0x%p\n",
@@ -881,7 +927,11 @@ static int build_symbol_table(struct payload *payload, struct xsplice_elf *elf)
 
         if ( !found )
         {
-            if ( xsplice_symbols_lookup_by_name(symtab[i].name, true) )
+            int rc;
+
+            rc = xsplice_symbols_lookup_by_name(NULL, symtab[i].name, NULL,
+                                                true);
+            if ( rc == 0 )
             {
                 printk(XENLOG_ERR "duplicate new symbol: %s\n", symtab[i].name);
                 xfree(symtab);
@@ -921,7 +971,7 @@ static int load_module(struct payload *payload, uint8_t *raw, ssize_t len)
     if ( rc )
         goto err_elf;
 
-    rc = resolve_symbols(&elf);
+    rc = resolve_symbols(payload, &elf);
     if ( rc )
         goto err_module;
 
@@ -982,6 +1032,23 @@ static int apply_depcheck(struct payload *payload)
     return -EINVAL;
 }
 
+/* Only apply if the required modules are applied. */
+static int apply_module_check(struct payload *payload)
+{
+    struct payload_use *use;
+
+    list_for_each_entry ( use, &payload->target_list, target_list )
+    {
+        if ( use->target->state != XSPLICE_STATE_APPLIED )
+        {
+            printk(XENLOG_ERR "requires %s but not applied\n", use->target->id);
+            return -EINVAL;
+        }
+    }
+
+    return 0;
+}
+
 /*
  * This function is executed having all other CPUs with no stack and IRQs
  * disabled.
@@ -991,6 +1058,10 @@ static int apply_payload(struct payload *data)
     int i, rc;
 
     rc = apply_depcheck(data);
+    if ( rc )
+        return rc;
+
+    rc = apply_module_check(data);
     if ( rc )
         return rc;
 
@@ -1283,11 +1354,48 @@ unsigned long search_module_extables(unsigned long addr)
 }
 #endif
 
-uint64_t xsplice_symbols_lookup_by_name(const char *symname, bool new)
+static bool already_uses(struct payload *a, struct payload *b)
+{
+    struct payload_use *use;
+
+    list_for_each_entry ( use, &b->source_list, source_list )
+    {
+        if ( use->source == a )
+            return true;
+    }
+
+    return false;
+}
+
+/* Record a using b */
+static int add_payload_usage(struct payload *a, struct payload *b)
+{
+    struct payload_use *use;
+
+    if ( already_uses (a, b) )
+        return 0;
+
+    use = xmalloc(struct payload_use);
+    if ( !use )
+        return -ENOMEM;
+
+    use->source = a;
+    use->target = b;
+    list_add(&use->source_list, &b->source_list);
+    list_add(&use->target_list, &a->target_list);
+    printk(XENLOG_DEBUG "acquiring ref on %s\n", use->target->id);
+
+    return 0;
+}
+
+static int xsplice_symbols_lookup_by_name(struct payload *payload,
+                                          const char *symname,
+                                          uint64_t *value,
+                                          bool new)
 {
     struct payload *data;
     int i;
-    uint64_t value = 0;
+    int rc = -ENOENT;
 
     spin_lock(&payload_list_lock);
 
@@ -1300,7 +1408,12 @@ uint64_t xsplice_symbols_lookup_by_name(const char *symname, bool new)
 
             if ( !strcmp(data->symtab[i].name, symname) )
             {
-                value = data->symtab[i].value;
+                if ( value )
+                    *value = data->symtab[i].value;
+                if ( payload )
+                    rc = add_payload_usage(payload, data);
+                else
+                    rc = 0;
                 goto out;
             }
         }
@@ -1308,7 +1421,7 @@ uint64_t xsplice_symbols_lookup_by_name(const char *symname, bool new)
 
 out:
     spin_unlock(&payload_list_lock);
-    return value;
+    return rc;
 }
 
 const char *xsplice_symbols_lookup(unsigned long addr,
