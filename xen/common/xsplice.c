@@ -1203,7 +1203,7 @@ void do_xsplice(void)
 
         if ( atomic_read(&xsplice_work.semaphore) == total_cpus )
         {
-            struct payload *data2;
+            struct payload *data, *tmp;
 
             /* "Mask" NMIs */
             saved_nmi_callback = set_nmi_callback(mask_nmi_callback);
@@ -1232,14 +1232,11 @@ void do_xsplice(void)
                             xsplice_work.data->state = XSPLICE_STATE_CHECKED;
                         break;
                 case XSPLICE_ACTION_REPLACE:
-                        list_for_each_entry ( data2, &payload_list, list )
+                        list_for_each_entry_safe_reverse ( data, tmp, &applied_list, applied_list )
                         {
-                            if ( data2->state != XSPLICE_STATE_APPLIED )
-                                continue;
-
-                            data2->rc = revert_payload(data2);
-                            if ( data2->rc == 0 )
-                                data2->state = XSPLICE_STATE_CHECKED;
+                            data->rc = revert_payload(data);
+                            if ( data->rc == 0 )
+                                data->state = XSPLICE_STATE_CHECKED;
                             else
                             {
                                 xsplice_work.data->rc = -EINVAL;
