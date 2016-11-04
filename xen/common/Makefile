@@ -24,6 +24,7 @@ obj-y += lzo.o
 obj-$(CONFIG_HAS_MEM_ACCESS) += mem_access.o
 obj-y += memory.o
 obj-y += monitor.o
+obj-$(CONFIG_PAYLOAD_SIGNING) += mpi.o
 obj-y += multicall.o
 obj-y += notifier.o
 obj-y += page_alloc.o

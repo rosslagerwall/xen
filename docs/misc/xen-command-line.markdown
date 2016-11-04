@@ -1377,6 +1377,12 @@ Specify the host reboot method.
 'efi' instructs Xen to reboot using the EFI reboot call (in EFI mode by
  default it will use that method first).
 
+### livepatch-require-signed
+> `= <boolean>`
+
+Require LivePatch payloads to be signed. If disabled, unsigned payloads can be
+loaded. The default depends on the value of CONFIG_PAYLOAD_REQUIRE_SIG.
+
 ### ro-hpet
 > `= <boolean>`
 

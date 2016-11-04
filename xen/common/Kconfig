@@ -237,4 +237,31 @@ config FAST_SYMBOL_LOOKUP
 	  The only user of this is Live patching.
 
 	  If unsure, say Y.
+
+config PAYLOAD_SIGNING
+	bool "Verify signed LivePatch payloads"
+	default n
+	depends on LIVEPATCH
+	select CRYPTO
+	---help---
+	  Verify signed LivePatch payloads using an RSA public key built
+	  into the Xen hypervisor. Selecting this option requires a
+	  public key in PEM format to be available for embedding during
+	  the build.
+
+config PAYLOAD_SIG_KEY
+	string "File name of payload signing public key"
+	default "signing_key.pem"
+	depends on PAYLOAD_SIGNING
+	---help---
+          The file name of an RSA public key in PEM format to be used for
+	  verifying signed LivePatch payloads.
+
+config PAYLOAD_REQUIRE_SIG
+	bool "Require LivePatch payloads to be validly signed by default"
+	default n
+	depends on PAYLOAD_SIGNING
+	---help---
+	  Reject unsigned LivePatch payloads or payloads signed with the
+	  incorrect key by default.
 endmenu

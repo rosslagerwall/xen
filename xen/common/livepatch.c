@@ -21,6 +21,10 @@
 #include <xen/virtual_region.h>
 #include <xen/vmap.h>
 #include <xen/wait.h>
+#include <xen/mpi.h>
+#include <xen/sha256.h>
+#include <xen/rsa.h>
+#include <xen/kconfig.h>
 #include <xen/livepatch_elf.h>
 #include <xen/livepatch.h>
 #include <xen/livepatch_payload.h>
@@ -102,6 +106,17 @@ static struct livepatch_work livepatch_work;
  * Having an per-cpu lessens the load.
  */
 static DEFINE_PER_CPU(bool_t, work_to_do);
+
+#ifdef CONFIG_PAYLOAD_SIGNING
+/* The public key contained with Xen used to verify payload signatures. */
+extern const uint8_t builtin_payload_key_buffer[];
+static struct rsa_public_key builtin_payload_key;
+
+static bool opt_livepatch_require_signed = IS_ENABLED(CONFIG_PAYLOAD_REQUIRE_SIG);
+boolean_param("livepatch-require-signed", opt_livepatch_require_signed);
+#else
+static bool opt_livepatch_require_signed = 0;
+#endif
 
 static int get_name(const xen_livepatch_name_t *name, char *n)
 {
@@ -896,19 +911,102 @@ static int load_payload_data(struct payload *payload, void *raw, size_t len)
     return rc;
 }
 
+#ifdef CONFIG_PAYLOAD_SIGNING
+#define SIGNATURE_ALGORITHM_RSA 0
+#define SIGNATURE_HASH_SHA256 0
+
+/* Format of the payload:
+ * [Payload data...] [Signature...] [Signature info] "~Payload signature appended~\n"
+ * Where Signature info is:
+ *     uint32_t sig_len (host endianness)
+ *     uint8_t algo
+ *     uint8_t hash
+ *     uint8_t pad[2]
+ */
+
+struct payload_signature {
+    uint32_t sig_len;    /* Length of signature data */
+    uint8_t algo;        /* Public-key crypto algorithm */
+    uint8_t hash;        /* Digest algorithm */
+    uint8_t pad[2];
+};
+
+#define SIG_MARKER "~Payload signature appended~\n"
+
+static int check_rsa_sha256_signature(void *data, uint64_t datalen,
+                                      void *sig, uint32_t siglen)
+{
+    struct sha256_ctx hash;
+    MPI s;
+    int ret;
+
+    s = mpi_read_raw_data(sig, siglen);
+    if ( !s )
+        return -ENOMEM;
+
+    sha256_init(&hash);
+    sha256_update(&hash, datalen, data);
+
+    ret = rsa_sha256_verify(&builtin_payload_key, &hash, s);
+
+    mpi_free(s);
+    return ret;
+}
+
+static int check_signature(void *payload, uint64_t *size)
+{
+    const unsigned long markerlen = sizeof(SIG_MARKER) - 1;
+    struct payload_signature siginfo;
+
+    if ( *size <= markerlen ||
+         memcmp(payload + *size - markerlen, SIG_MARKER, markerlen) )
+        return -ENOENT;
+    *size -= markerlen;
+
+    if ( *size <= (sizeof siginfo) )
+    {
+        printk("Invalid payload signature\n");
+        return -EINVAL;
+    }
+
+    memcpy(&siginfo, payload + *size - (sizeof siginfo), sizeof siginfo);
+    *size -= sizeof siginfo;
+
+    if ( siginfo.algo != SIGNATURE_ALGORITHM_RSA ||
+         siginfo.hash != SIGNATURE_HASH_SHA256 ||
+         siginfo.sig_len == 0 ||
+         *size <= siginfo.sig_len )
+    {
+        printk("Invalid payload signature\n");
+        return -EINVAL;
+    }
+    *size -= siginfo.sig_len;
+
+    return check_rsa_sha256_signature(payload, *size,
+                                      payload + *size, siginfo.sig_len);
+}
+#else
+static int check_signature(void *payload, uint64_t *size)
+{
+    return 0;
+}
+#endif
+
 static int livepatch_upload(xen_sysctl_livepatch_upload_t *upload)
 {
     struct payload *data, *found;
     char n[XEN_LIVEPATCH_NAME_SIZE];
     void *raw_data;
+    uint64_t size;
     int rc;
 
     rc = verify_payload(upload, n);
     if ( rc )
         return rc;
 
+    size = upload->size;
     data = xzalloc(struct payload);
-    raw_data = vmalloc(upload->size);
+    raw_data = vmalloc(size);
 
     spin_lock(&payload_lock);
 
@@ -919,23 +1017,30 @@ static int livepatch_upload(xen_sysctl_livepatch_upload_t *upload)
         rc = -EEXIST;
     else if ( !data || !raw_data )
         rc = -ENOMEM;
-    else if ( __copy_from_guest(raw_data, upload->payload, upload->size) )
+    else if ( __copy_from_guest(raw_data, upload->payload, size) )
         rc = -EFAULT;
     else
     {
-        memcpy(data->name, n, strlen(n));
-
-        rc = load_payload_data(data, raw_data, upload->size);
+        rc = check_signature(raw_data, &size);
         if ( rc )
-            goto out;
+            printk("Failed verify signature\n");
 
-        data->state = LIVEPATCH_STATE_CHECKED;
-        INIT_LIST_HEAD(&data->list);
-        INIT_LIST_HEAD(&data->applied_list);
+        if ( !rc || !opt_livepatch_require_signed )
+        {
+            memcpy(data->name, n, strlen(n));
 
-        list_add_tail(&data->list, &payload_list);
-        payload_cnt++;
-        payload_version++;
+            rc = load_payload_data(data, raw_data, size);
+            if ( rc )
+                goto out;
+
+            data->state = LIVEPATCH_STATE_CHECKED;
+            INIT_LIST_HEAD(&data->list);
+            INIT_LIST_HEAD(&data->applied_list);
+
+            list_add_tail(&data->list, &payload_list);
+            payload_cnt++;
+            payload_version++;
+        }
     }
 
  out:
@@ -1658,9 +1763,39 @@ static void livepatch_printall(unsigned char key)
     spin_unlock(&payload_lock);
 }
 
+#ifdef CONFIG_PAYLOAD_SIGNING
+static int __init load_builtin_payload_key(void)
+{
+    const uint8_t *ptr;
+    uint32_t len;
+
+    rsa_public_key_init(&builtin_payload_key);
+
+    ptr = builtin_payload_key_buffer;
+
+    memcpy(&len, ptr, sizeof(len));
+    ptr += sizeof(len);
+    builtin_payload_key.n = mpi_read_raw_data(ptr, len);
+    ptr += len;
+
+    memcpy(&len, ptr, sizeof(len));
+    ptr += sizeof(len);
+    builtin_payload_key.e = mpi_read_raw_data(ptr, len);
+
+    return rsa_public_key_prepare(&builtin_payload_key);
+}
+#else
+static int __init load_builtin_payload_key(void)
+{
+    return 0;
+}
+#endif
+
 static int __init livepatch_init(void)
 {
     register_keyhandler('x', livepatch_printall, "print livepatch info", 1);
+    load_builtin_payload_key();
+    /* XXX check ret */
 
     arch_livepatch_init();
     return 0;
